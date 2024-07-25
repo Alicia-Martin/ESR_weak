@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib as mpl
 import os
+from tabulate import tabulate
 
 from esr.fitting.sympy_symbols import *
 import esr.generation.simplifier as simplifier
@@ -51,10 +52,13 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
         print('Making:', likelihood.fig_dir)
         os.mkdir(likelihood.fig_dir)
 
-    with open(likelihood.out_dir + '/final_'+str(comp)+'.dat', "r") as f:
-        reader = csv.reader(f, delimiter=';')
-        data = [row for row in reader]
-    
+    data = []
+    for comp in range(5, 9):
+        with open(likelihood.out_dir + '/final_'+str(comp)+'.dat', "r") as f:
+            reader = csv.reader(f, delimiter=';')
+            data_comp = [row for row in reader]
+            data += data_comp
+    # print('data:', data)
     if len(data) == 0:
         print("No functions with finite DL found, so will not make figure")
         return
@@ -70,10 +74,61 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
     DL_min = np.amin(DL[np.isfinite(DL)])
     alpha = DL_min - DL
     alpha = np.exp(alpha)
-    m = (alpha > vmin)
-    fcn_list = [d for i, d in enumerate(fcn_list) if m[i]]
-    params = params[m,:]
-    alpha = alpha[m]
+    # m = (alpha > vmin)
+    # fcn_list = [d for i, d in enumerate(fcn_list) if m[i]]
+    # params = params[m,:]
+    # alpha = alpha[m]
+    # print('fcn_list:', fcn_list)
+
+    # Sort by alpha to get the best 5 functions
+    best_indices = np.argsort(DL)[:5]
+    # print('best_indices:', best_indices)
+    fcn_list = [fcn_list[i] for i in best_indices]
+    # print('fcn_list:', fcn_list)
+    params = params[best_indices]
+    alpha = alpha[best_indices]
+    DL = DL[best_indices]
+    # print('best_indices:', best_indices)
+    # print(DL)
+    vmin = 2*1e-2
+    vmax = alpha.max()
+    # print('vmin:', vmin, 'vmax:', vmax)
+    # sys.exit()
+
+
+    #Add NFW to the list
+    fcn_NFW = 'a0/(x*(x + a1))^2'
+    fcn_list += [fcn_NFW]
+    params_NFW = np.array([377.45399758, 3.36153469, 0, 0])
+    DL_NFW = 45.665482161689106
+    alpha_NFW = DL_min - DL_NFW
+    alpha_NFW = np.exp(alpha_NFW)
+
+    params = np.vstack([params, params_NFW])
+    DL = np.append(DL, DL_NFW)
+    alpha = np.append(alpha, alpha_NFW)
+
+    #Table
+    # Creating the header for the table
+    # headers = ["Function", "DL", "a0", "a1"]
+    # two_params = params[:, :2]
+
+    # # Preparing data for the table
+    # table_data = []
+    # for i in range(len(fcn_list)):
+    #     row = [fcn_list[i], DL[i]] + two_params[i].tolist()
+    #     table_data.append(row)
+
+    # # Creating the table
+    # table = tabulate(table_data, headers=headers, tablefmt="pretty")
+
+    # print(table)
+    # sys.exit()
+
+
+
+    # vmin = alpha.min()
+
 
     fig  = plt.figure(figsize=(7,5))
     ax1  = fig.add_axes([0.10,0.10,0.70,0.85])
@@ -83,7 +138,12 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
     fig2 = plt.figure(figsize=(7,5))
     axfig2  = fig2.add_axes([0.10,0.10,0.70,0.85])
 
-    for i in range(min(len(fcn_list),50)):
+    fig3 = plt.figure(figsize=(7,5))
+    axfig3  = fig3.add_axes([0.10,0.10,0.70,0.85])
+
+    for i in range(min(len(fcn_list), 50)):
+        print('i:', i)
+        print(DL[i], alpha[i])
 
         fcn_i = fcn_list[i].replace('\'', '')
         
@@ -104,36 +164,41 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
         else:
             eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
         ypred = likelihood.get_pred(measured, likelihood.xvar, eq_numpy)
-        # except:
-        #     if try_integration:
-        #         fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
-        #         if k > 0:
-        #             all_a = ' '.join([f'a{i}' for i in range(k)])
-        #             all_a = list(sympy.symbols(all_a, real=True))
-        #             eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
-        #         else:
-        #             eq_numpy = sympy.lambdify([x], eq, modules=["numpy"])
-        #             ypred = likelihood.get_pred(likelihood.xvar, measured, eq_numpy)
-        #     else:
-        #         continue
 
-        esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
+        x_range = np.linspace(likelihood.xvar.min(), likelihood.xvar.max(), 1000)
+        density = eq_numpy(x_range, *measured)
 
-        axfig2.plot(likelihood.xvar, ypred, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i, label = fcn_i)
-
-        if np.isscalar(ypred):
-            ax1.plot(likelihood.xvar, [esd]*len(likelihood.xvar), color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
+        if i==len(fcn_list)-1:
+            print('HERE')
+            axfig2.plot(x_range, density, color='blue', label='NFW')
         else:
-            ax1.plot(likelihood.xvar, esd, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
-        
+            axfig2.plot(x_range, density, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
+        # axfig2.set_xscale('log')
+        axfig2.set_yscale('log')
+        # axfig2.set_ylim(10**6, 10**7)
+        axfig2.set_xlabel(r'$r (Mpc)$')
+        axfig2.set_ylabel(r'$\rho / 10^{12} M_{sun}/Mpc^3)$')
+
+
+        if i==len(fcn_list)-1:
+            print('HERE')
+            ax1.plot(likelihood.xvar, ypred, color='blue', label='NFW')
+
+        else:
+            if np.isscalar(ypred):
+                ax1.plot(likelihood.xvar, [ypred]*len(likelihood.xvar), color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
+            else:
+                ax1.plot(likelihood.xvar, ypred, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
     if hasattr(likelihood, 'yerr'):
         ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.', markersize=5, zorder=len(fcn_list)+1, capsize=1, elinewidth=1, color='k', alpha=1)
     else:
         ax1.plot(likelihood.xvar, likelihood.yvar, '.', color='k', ms=5, zorder=len(fcn_list)+1, alpha=1)
-    ax1.set_xlabel(r'$r_{proj} (Mpc)$')
-    ax1.set_ylabel(r'$ESD (10^{12} M_{sun}/Mpc^2)$')
-    ax1.set_xscale(xscale)
-    ax1.set_yscale(yscale)
+    ax1.set_xlabel(r'$r_{proj} / Mpc$')
+    ax1.set_ylabel(r'$ESD / 10^{12} M_{sun}/Mpc^2$')
+    # ax1.set_xscale(xscale)
+    ax1.set_yscale('log')
+    # ax1.set_xscale(xscale)
+    # ax1.set_yscale(yscale)
     if xscale != 'log':
         ax1.set_xlim(0, None)
     ax1.set_ylim(likelihood.yvar.min() * 0.9, likelihood.yvar.max() * 1.1)
@@ -141,14 +206,26 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
     ax2  = fig.add_axes([0.85,0.10,0.05,0.85])
     cb1  = mpl.colorbar.ColorbarBase(ax2,cmap=cmap,norm=norm,orientation='vertical')
     cb1.set_label(r'$\exp \left( MDL - DL \right)$')
+    fig.legend(loc='upper right', bbox_to_anchor=(0.8, 0.95))
     fig.tight_layout()
-    fig.savefig(likelihood.fig_dir + '/plot_%i.png'%comp, dpi=300)
+    # fig.savefig(likelihood.fig_dir + '/plot_all_comp.png', dpi=300)
     fig.clf()
     plt.close(fig)
 
     fig2.tight_layout()
-    fig2.savefig(likelihood.fig_dir + '/density_plot_%i.png'%comp, dpi=300)
+    fig2.legend(loc='upper right')
+    # plt.show()
+    # fig2.savefig(likelihood.fig_dir + '/density_plot_all_comp.png', dpi=300)
     fig2.clf()
     plt.close(fig2)
+
+    axfig3.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.', markersize=5, zorder=len(fcn_list)+1, capsize=1, elinewidth=1, color='k', alpha=1)
+    axfig3.set_xlabel(r'$r_{proj} / Mpc$')
+    axfig3.set_ylabel(r'$ESD / 10^{12} M_{sun}/Mpc^2$')
+    axfig3.set_yscale('log')
+    fig3.tight_layout()
+    fig3.savefig(likelihood.fig_dir + '/plot_data.png', dpi=300)
+    fig3.clf()
+    plt.close(fig3)
 
     return

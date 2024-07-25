@@ -135,6 +135,7 @@ def main(comp, likelihood, print_frequency=1000):
         if len(DL_min) > 0:
             arr_sort = np.transpose( sorted( np.transpose(np.vstack([DL_min, xarr])), key = lambda x: x[0] ) )     # Sort by DL but keep track of array indices
             DL_sort = arr_sort[0,:]
+            # print(DL_sort)
             indices_sort = arr_sort[1,:].astype(int)
 
             params_sort = params_min[indices_sort,:]

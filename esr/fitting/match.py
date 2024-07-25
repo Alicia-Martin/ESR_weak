@@ -36,11 +36,27 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
     if likelihood.is_mse:
         raise ValueError('Cannot use MSE with description length')
 
-    def fop(x):
-        return likelihood.negloglike(x,eq_numpy, integrated=integrated)
+    # def fop(x):
+    #     return likelihood.negloglike(x,eq_numpy)
         
-    def f1(x):
-        return likelihood.negloglike([x],eq_numpy, integrated=integrated)
+    # def f1(x):
+    #     return likelihood.negloglike([x],eq_numpy)
+
+
+    # Data
+    xvar = likelihood.xvar
+    yvar = likelihood.yvar
+    yerr = likelihood.yerr
+
+
+    def get_fop(chi2_fcn, total_param):
+        if total_param > 0:
+            def fop(x):
+                return chi2_fcn(x, xvar, yvar, yerr)
+        else:
+            def fop(x):
+                return chi2_fcn([x], xvar, yvar, yerr)
+        return fop
         
     if rank == 0:
         print('\nMatching', flush=True)
@@ -76,6 +92,31 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         index_arr[i] = index
 
         negloglike_all[i] = negloglike[index]           # Assign the likelihood of this variant to the that of the unique eq
+
+        fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax)
+
+        try:
+
+            if nparams == 0:
+                eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+            elif nparams > 1:
+                all_a = ' '.join([f'a{i}' for i in range(nparams)])
+                all_a = list(sympy.symbols(all_a, real=True))
+                eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+            else:
+                eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+        except:
+            print('Error with function:', fcn_i)
+            codelen[i] = np.inf
+            continue
+
+
+        #likelihood
+        loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
+        chi2_fcn =likelihood.get_wrapped_like(loss_template)
+        xvar = likelihood.xvar
+        yvar = likelihood.yvar
+        yerr = likelihood.yerr
 
         if np.isnan(negloglike[index]) or np.isinf(negloglike[index]):          # Element of the unique eqs file, common to all procs
             codelen[i] = np.nan
@@ -126,19 +167,21 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 p=0.
             
             try:            # It's possible that after putting params to 0 the likelihood is botched, in which case give it nan
-                fcn_i, eq, integrated = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
+                fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
                 if k==1:
                     eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
-                    negloglike_all[i] = f1(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
+                    fop = get_fop(chi2_fcn, total_param=nparams)
+                    negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
                 else:
                     all_a = ' '.join([f'a{i}' for i in range(nparams)])
                     all_a = list(sympy.symbols(all_a, real=True))
                     eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+                    fop = get_fop(chi2_fcn, total_param=nparams)
                     negloglike_all[i] = fop(p)
 
             except NameError:
                 if try_integration:
-                    fcn_i, eq, integrated = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
+                    fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
                     if k==1:
                         eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
                         negloglike_all[i] = f1(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
@@ -146,6 +189,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                         all_a = ' '.join([f'a{i}' for i in range(nparams)])
                         all_a = list(sympy.symbols(all_a, real=True))
                         eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+                        fop = get_fop(chi2_fcn, total_param=nparams)
                         negloglike_all[i] = fop(p)
                 else:
                     negloglike_all[i] = np.nan
@@ -165,8 +209,10 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                         for idx_ in idx:
                             p[idx_] = 0.
                         if k==1:
-                            negloglike_all[i] = f1(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
+                            fop = get_fop(chi2_fcn, total_param=nparams)
+                            negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
                         else:
+                            fop = get_fop(chi2_fcn, total_param=len(p))
                             negloglike_all[i] = fop(p)
                         if np.isfinite(negloglike_all[i]):
                             break
@@ -224,9 +270,11 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 params[i,:] = np.zeros(max_param)
         
         assert len(params[i,:])==max_param
+
+        # print(i, codelen[i], negloglike_all[i], flush=True)
         
 
-
+    # print(negloglike_all, codelen, index_arr, params, flush=True)
     out_arr = np.transpose(np.vstack([negloglike_all, codelen, index_arr] + [params[:,i] for i in range(max_param)]))
 
     np.savetxt(likelihood.temp_dir + '/codelen_matches_'+str(comp)+'_'+str(rank)+'.dat', out_arr, fmt='%.7e')        # Save the data for this proc in Partial

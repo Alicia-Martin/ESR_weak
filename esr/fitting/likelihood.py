@@ -102,7 +102,7 @@ class Likelihood:
                             "a0": a0,
                             "a1": a1,
                             "a2": a2})
-        return fcn_i, eq, False
+        return fcn_i, eq
 
 
 

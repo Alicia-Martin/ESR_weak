@@ -1,4 +1,5 @@
 import sys
+import numpy as np
 
 from esr.fitting.test_all import optimise_fun
 from esr.fitting.test_all_Fisher import convert_params
@@ -6,7 +7,7 @@ from esr.fitting.test_all_Fisher import convert_params
 import esr.generation.generator as generator
 import esr.generation.simplifier as simplifier
 
-def single_function(labels, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
+def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5, tmax=5,
     try_integration=False, verbose=False, Niter=30, Nconv=5, log_opt=False,
     return_params=False):
     """Run end-to-end fitting of function for a single function
@@ -58,7 +59,9 @@ def single_function(labels, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
     fsym = fsym[fstr]
     print(fstr)
     # (2) Fit this function to the data
-    chi2, params = optimise_fun(fstr,
+    Niter = 100
+    Nconv = 20
+    chi2, params, count_lowest, j, success = optimise_fun(fstr,
                             likelihood,
                             tmax,
                             pmin,
@@ -67,7 +70,13 @@ def single_function(labels, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
                             max_param=max_param,
                             Niter_params=[Niter],
                             Nconv_params=[Nconv],
-                            log_opt=log_opt)
+                            log_opt=log_opt,
+                            method=method)
+    
+    print('best:', chi2, params,count_lowest, j, success)
+    
+    
+    
                             
     if likelihood.is_mse:
         print('Not computing DL as using MSE')
@@ -75,11 +84,11 @@ def single_function(labels, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
         negloglike = chi2
     else:
         # (3) Obtain the Fisher matrix for this function
-        fcn, eq, integrated = likelihood.run_sympify(fstr,
+        fcn, eq = likelihood.run_sympify(fstr,
                                                 tmax=tmax,
                                                 try_integration=try_integration)
         params, negloglike, deriv, codelen = convert_params(
-            fcn, eq, integrated, params, likelihood, chi2, max_param=max_param)
+            fcn, eq, params, likelihood, chi2, max_param=max_param)
         if verbose:
             print('\ntheta_ML:', params)
             print('Residuals:', negloglike, chi2)
@@ -99,12 +108,14 @@ def single_function(labels, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
     if return_params:
         return negloglike, DL, params
 
-    return negloglike, DL
+    return negloglike, DL, params
+
+    # return chi2, params
     
     
 def fit_from_string(fun, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
     try_integration=False, verbose=False, Niter=30, Nconv=5, maxvar=20,
-    log_opt=False, replace_floats=False, return_params=False):
+    log_opt=False, replace_floats=False, return_params=False, method='BFGS'):
     """Run end-to-end fitting of function for a single function, given as a string.
     Note that this is not guaranteed to find the optimimum representation as a tree,
     so there could be a lower description-length representation of the function
@@ -200,7 +211,8 @@ def fit_from_string(fun, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
             Niter=Niter,
             Nconv=Nconv,
             log_opt=log_opt,
-            return_params=return_params
+            return_params=return_params,
+            method=method
     )
     
     if return_params:
