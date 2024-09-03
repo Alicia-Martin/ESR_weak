@@ -8,6 +8,7 @@ from esr.fitting.sympy_symbols import *
 
 from esr.esd import ExcessSurfaceDensity
 import sys
+import pickle
 
 
 
@@ -19,13 +20,23 @@ class WLLikelihood(Likelihood):
         # print('run_name', run_name)
         #Load data
         # Read the file
-        with open(data_file, 'r') as file:
-            lines = file.readlines()
+        # with open(data_file, 'r') as file:
+        #     lines = file.readlines()
 
+        with open(data_file, 'rb') as file:
+            data = pickle.load(file)
+
+        no_nans = np.isnan(data['ds']) == False
+        self.xvar = data['rp'][no_nans]
+        self.yvar = data['ds'][no_nans]
+        self.yerr = data['ds_err'][no_nans]
+
+        # print(self.xvar, self.yvar, self.yerr)
+        # sys.exit()
         # Extract the data
-        self.xvar = jnp.array([float(value) for value in lines[0].strip().split(', ')])
-        self.yvar = jnp.array([float(value) for value in lines[1].strip().split(', ')])
-        self.yerr = jnp.array([float(value) for value in lines[2].strip().split(', ')])
+        # self.xvar = jnp.array([float(value) for value in lines[0].strip().split(', ')])
+        # self.yvar = jnp.array([float(value) for value in lines[1].strip().split(', ')])
+        # self.yerr = jnp.array([float(value) for value in lines[2].strip().split(', ')])
 
 
         super().__init__(data_file, data_file, run_name, data_dir=data_dir, fn_set = fn_set)
@@ -75,16 +86,18 @@ class WLLikelihood(Likelihood):
 
             #check that the density is positive
             negloglike = 0
-            negloglike += check_density(a, eq_numpy, xvar)
+            # negloglike += check_density(a, eq_numpy, xvar)
 
 
             def neg_log_gaussian(x, mean, std):
                 return (x - mean)**2/(2*std**2)
-            
+
             nll = neg_log_gaussian(ypred, yvar, yerr)
             nll = jnp.sum(nll)
 
             negloglike += nll
+
+            # jax.debug.print('{x}', x = negloglike)
             
             return negloglike
         

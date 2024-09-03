@@ -45,11 +45,19 @@ def main(comp, likelihood, print_frequency=1000):
     negloglike = data[:,0]
     codelen = data[:,1]
     index = data[:,2]
-    params = data[:,3:]
+    # params = data[:,3:]
+    params = data[:,3:-3]
+    Nconv = data[:,-3]
+    Niter = data[:,-2]
+    time = data[:, -1]
+
     aifeyn = np.genfromtxt(aifeyn_file) # All
     codelen = np.atleast_1d(codelen)
     index = np.atleast_1d(index)
     aifeyn = np.atleast_1d(aifeyn)
+    Nconv = np.atleast_1d(Nconv)
+    Niter = np.atleast_1d(Niter)
+    time = np.atleast_1d(time)
 
     fcn_list_proc, data_start, data_end = test_all.get_functions(comp, likelihood)
 
@@ -60,6 +68,9 @@ def main(comp, likelihood, print_frequency=1000):
     negloglike_min = np.zeros(len(fcn_list_proc))
     codelen_min = np.zeros(len(fcn_list_proc))
     aifeyn_min = np.zeros(len(fcn_list_proc))
+    Nconv_min = np.zeros(len(fcn_list_proc))
+    Niter_min = np.zeros(len(fcn_list_proc))
+    time_min = np.zeros(len(fcn_list_proc))
 
     xarr = np.linspace(0, len(fcn_list)-1, len(fcn_list)).astype(int)           # Indices of all the unique fcns, which are what we're looping over
     xarr_proc = xarr[data_start:data_end]        # Which unique function indices this proc will look at
@@ -69,7 +80,10 @@ def main(comp, likelihood, print_frequency=1000):
             print(f'{i+1} of {len(fcn_list_proc)}', flush=True)
             
         negloglike_i, codelen_i, aifeyn_i = negloglike[index==xarr_proc[i]], codelen[index==xarr_proc[i]], aifeyn[index==xarr_proc[i]]           # Arrays of all variants for this unique fcn
-        
+        Nconv_i = Nconv[index==xarr_proc[i]]
+        Niter_i = Niter[index==xarr_proc[i]]
+        time_i = time[index==xarr_proc[i]]
+
         m = (index==xarr_proc[i])
         fcn_list_all_i = [fcn_list_all[j] for j in range(len(m)) if m[j]]
         params_i = params[index==xarr_proc[i], :]
@@ -86,9 +100,13 @@ def main(comp, likelihood, print_frequency=1000):
         negloglike_min[i] = negloglike_i[np.nanargmin(DL)]
         codelen_min[i] = codelen_i[np.nanargmin(DL)]
         aifeyn_min[i] = aifeyn_i[np.nanargmin(DL)]
+        Nconv_min[i] = Nconv_i[np.nanargmin(DL)]
+        Niter_min[i] = Niter_i[np.nanargmin(DL)]
+        time_min[i] = time_i[np.nanargmin(DL)]
 
-    out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min]))
-    
+    # out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min]))
+    # print(negloglike_min)
+    out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min] + [Nconv_min, Niter_min, time_min]))
     prefix = likelihood.combineDL_prefix
 
     np.savetxt(likelihood.temp_dir + '/'+prefix+str(comp)+'_'+str(rank)+'.dat', out_arr, fmt='%.16e')        # Save the data for this proc in Partial
@@ -112,15 +130,21 @@ def main(comp, likelihood, print_frequency=1000):
         data = np.genfromtxt(likelihood.out_dir + '/'+prefix+'comp'+str(comp)+'.dat')            # This is the combined results from all procs, and the rest should be as before
         DL_min = data[:,0]
         params_min = data[:,1:1+params.shape[1]]
-        negloglike_min = data[:,-3]
-        codelen_min = data[:,-2]
-        aifeyn_min = data[:,-1]
+        negloglike_min = data[:,-6]
+        codelen_min = data[:,-5]
+        aifeyn_min = data[:,-4]
+        Nconv_min = data[:,-3]
+        Niter_min = data[:,-2]
+        time_min = data[:,-1]
         
         DL_min = np.atleast_1d(DL_min)
         params_min = np.atleast_2d(params_min)
         negloglike_min = np.atleast_1d(negloglike_min)
         codelen_min = np.atleast_1d(codelen_min)
         aifeyn_min = np.atleast_1d(aifeyn_min)
+        Nconv_min = np.atleast_1d(Nconv_min)
+        Niter_min = np.atleast_1d(Niter_min)
+        time_min = np.atleast_1d(time_min)
 
         with open(likelihood.out_dir + '/'+prefix+'fcn_comp'+str(comp)+'.dat', "r") as f:         # All
             fcn_min = f.read().splitlines()
@@ -144,11 +168,17 @@ def main(comp, likelihood, print_frequency=1000):
             negloglike_sort = negloglike_min[indices_sort]
             codelen_sort = codelen_min[indices_sort]
             aifeyn_sort = aifeyn_min[indices_sort]
+            Nconv_sort = Nconv_min[indices_sort]
+            Niter_sort = Niter_min[indices_sort]
+            time_sort = time_min[indices_sort]
         else:
             negloglike_sort = []
             codelen_sort = []
             aifeyn_sort = []
             DL_sort = []
+            Nconv_sort = []
+            Niter_sort = []
+            time_sort = []
 
         if os.path.exists(likelihood.out_dir + '/'+likelihood.final_prefix+str(comp)+'.dat'):           # Start this file from scratch here
             os.remove(likelihood.out_dir + '/'+likelihood.final_prefix+str(comp)+'.dat')
@@ -168,18 +198,28 @@ def main(comp, likelihood, print_frequency=1000):
         Prel /= np.sum(Prel)                # Relative probability of fcn, normalised over the top 1000 functions just of this complexity
 
         ptab = PrettyTable()
-        ptab.field_names = ["Rank", "Function", "L(D)", "Prel", "-logL", "Codelen", "AIFeyn"] + [f"a{i}" for i in range(params.shape[1])]
+        names = ["Rank", "Function", "L(D)", "Prel", "-logL", "Codelen", "AIFeyn"] + [f"a{i}" for i in range(params.shape[1])]
+        #Time and other things
+        names += ["Nconv", "Niter", "Time"]
+        ptab.field_names = names
 
         for i in range(len(DL_sort)):
             
             # Only happens for non-duplicates; all Prels should be non-zero
             if i < Nfuncs:
-                ptab.add_row([i+1, fcn_min_sort[i], '%.2f'%DL_sort[i], '%.2e'%Prel[i], '%.2f'%negloglike_sort[i], '%.2f'%codelen_sort[i], '%.2e'%aifeyn_sort[i]] + [ '%.2e'%params_sort[i,j] for j in range(params.shape[1])])
+                # Combine all data into a single list
+                row_data = [i+1, fcn_min_sort[i], '%.2f'%DL_sort[i], '%.2e'%Prel[i], '%.2f'%negloglike_sort[i], '%.2f'%codelen_sort[i], '%.2e'%aifeyn_sort[i]]
+                row_data += ['%.2e'%params_sort[i,j] for j in range(params.shape[1])]
+                row_data += ['%.2f'%Nconv_sort[i], '%.2f'%Niter_sort[i], '%.2f'%time_sort[i]]
+
+                # Add the row to the table
+                ptab.add_row(row_data)
+                # ptab.add_row([i+1, fcn_min_sort[i], '%.2f'%DL_sort[i], '%.2e'%Prel[i], '%.2f'%negloglike_sort[i], '%.2f'%codelen_sort[i], '%.2e'%aifeyn_sort[i]] + [ '%.2e'%params_sort[i,j] for j in range(params.shape[1])])
 
             
             with open(likelihood.out_dir + '/'+likelihood.final_prefix+str(comp)+'.dat', 'a') as f:
                 writer = csv.writer(f, delimiter=';')
-                writer.writerow([i, fcn_min_sort[i], DL_sort[i], Prel[i], negloglike_sort[i], codelen_sort[i], aifeyn_sort[i]] + [params_sort[i,j] for j in range(params.shape[1])])
+                writer.writerow([i, fcn_min_sort[i], DL_sort[i], Prel[i], negloglike_sort[i], codelen_sort[i], aifeyn_sort[i]] + [params_sort[i,j] for j in range(params.shape[1])] + [Nconv_sort[i], Niter_sort[i], time_sort[i]])
         
         if len(DL_sort) == 0:
             os.system("touch " + likelihood.out_dir + '/'+likelihood.final_prefix+str(comp)+'.dat')

@@ -10,14 +10,138 @@ import itertools
 import esr.fitting.test_all as test_all
 import esr.fitting.test_all_Fisher as test_all_Fisher
 from esr.fitting.sympy_symbols import *
+import matplotlib.pyplot as plt
 
 import esr.generation.simplifier as simplifier
+import jax.numpy as jnp
+import scipy
+from jax import vmap
 
 warnings.filterwarnings("ignore")
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
+
+
+def get_sigma_from_integral(p, Sigma, j, k, i, fcn_i, negloglike_all, nparams, max_fun_params, fop, number_points=10**3):
+        def fraction_likelihood(x, p, j, k, right):
+            if right:
+                factor = 1
+            else:
+                factor = -1
+
+            # if k == 1:  
+            #     return np.abs(fop([x]) - negloglike_all[i] - np.log(1e4))  
+            # else:
+            params = np.copy(p)
+            # print('param', params, flush=True)
+            params[j] = params[j] + factor*10**(x)
+            # print('after', params, flush=True)
+            # print(params, flush=True)
+            # print('fop', fop(params))
+            # print(negloglike_all[i])
+            return np.abs(fop(params) - negloglike_all[i] - np.log(1e4))
+        
+        def get_boundary(res_plus, res_minus, theta):
+            if res_plus.success == False:
+                boundary = 10**res_minus.x[0]
+            elif res_minus.success == False:
+                boundary = 10**res_plus.x[0]
+            else:
+                boundary_right = 10**res_plus.x[0]
+                boundary_left = 10**res_minus.x[0]
+                boundary = max(boundary_right, boundary_left)
+            return boundary
+        
+        def get_integral(theta, boundary, param, fop, negloglike, number_points=5*10**2):
+            def compute_like(theta):
+                return jnp.exp(-fop(theta) + negloglike)
+
+            boundary_range = np.array([-boundary, boundary])
+            # Loop through left and right boundaries
+            integrals = []
+            for boundary_shift in boundary_range:
+                a_range = np.linspace(theta, theta + boundary_shift, number_points)
+                thetas = np.tile(param, (len(a_range), 1))
+                thetas[:, j] = a_range
+                like = vmap(compute_like)(thetas)
+
+                # Integrate
+                integral = scipy.integrate.cumtrapz(like, a_range)
+                integrals.append(integral)
+
+            # Combine left and right integrals
+            integral_left, integral_right = [np.array(integral) for integral in integrals]
+            integral = - integral_left + integral_right
+
+            return integral, a_range
+        
+        def test_success(res):
+            if res.success == False or res.fun > 0.01:
+                return False
+            else:
+                return True
+
+        param = p[:nparams]
+        # initial_guess_array = [10**(-6), 10**(-5), 10**(-4), 10**(-3), 10**(-2), 10**(-1), 1, 10, 10**2, 10**3]
+        # # neglog_initial_guess = (fop(test_initial_guess) for test_initial_guess in initial_guess_array)
+        # neglog_initial_guess = jnp.array([fop(np.array([test_initial_guess])) for test_initial_guess in initial_guess_array])
+        # print('neglog_initial_guess', neglog_initial_guess, flush=True)
+        # initial_guess = initial_guess_array[jnp.isfinite(neglog_initial_guess)[-1]]
+        # print('initial_guess', initial_guess, flush=True)
+
+        initial_guesses = [np.ones(nparams), np.ones(nparams)*(-1)]
+        arg_integral = np.append(np.argwhere(Sigma < 0), np.argwhere(Sigma == np.inf))
+        arg_integral = np.append(arg_integral, np.argwhere(np.isnan(Sigma)))
+
+        #Plot likelihood
+        # Delta_plot = 0.1
+        # x_range = np.linspace(param - Delta_plot, param + Delta_plot, 10**2)
+
+        # nll = []
+        # for x_value in x_range:
+        #     negloglike = fop(x_value)
+        #     nll = np.append(nll, negloglike)        
+        # plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
+        # # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
+        # plt.show()
+
+        # xx = param + 10**(-2)
+        # yy = fop(xx)
+        # print(yy, flush=True)
+        
+        for j in arg_integral:
+                theta = param[j]
+
+                for initial_guess in initial_guesses:
+                    # print('initial_guess', initial_guess, flush=True)
+                    res_minus = scipy.optimize.minimize(fraction_likelihood, initial_guess[j], args=(param, j, k, False), method='Nelder-Mead', tol=1e-8)
+                    res_plus = scipy.optimize.minimize(fraction_likelihood, initial_guess[j], args=(param, j, k, True), method = 'Nelder-Mead', tol=1e-8)
+                    # print(res_minus, res_plus, flush=True)
+
+                    if test_success(res_minus)== True or test_success(res_plus)==True:   
+                        # print("HERE")
+                        break        
+
+                if test_success(res_minus)== False and test_success(res_plus)==False:
+                    print("Couldn't find integral limits", fcn_i, flush=True)
+                    sigma = np.inf
+                    continue
+
+                boundary = get_boundary(res_plus, res_minus, theta)
+            
+                #do integral
+                integral, a_range = get_integral(theta, boundary, param, fop, negloglike_all[i], number_points=number_points)
+                                        
+                #get the 68% confidence interval from the integral
+                arg_min = np.argmin(abs(0.68 - integral/integral[-1]))
+                param68 = a_range[arg_min + 1]
+                sigma = np.abs(theta - param68)
+                Sigma[j] = sigma
+        # print(Sigma)
+
+        return Sigma
 
 def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
     """Apply results of fitting the unique functions to all functions and save to file
@@ -33,14 +157,21 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         None
         
     """
+    def get_eq_numpy(nparams, fcn_i, try_integration, tmax=5.):
+        fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
+        if nparams == 0:
+            eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+        elif nparams == 1:
+            eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+        else:
+            all_a = ' '.join([f'a{i}' for i in range(nparams)])
+            all_a = list(sympy.symbols(all_a, real=True))
+            eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+        return eq_numpy
+
+
     if likelihood.is_mse:
         raise ValueError('Cannot use MSE with description length')
-
-    # def fop(x):
-    #     return likelihood.negloglike(x,eq_numpy)
-        
-    # def f1(x):
-    #     return likelihood.negloglike([x],eq_numpy)
 
 
     # Data
@@ -65,7 +196,8 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
     match_file = likelihood.fn_dir + "/compl_%i/matches_%i.txt"%(comp,comp)
     
     fcn_list_proc, data_start, data_end = test_all.get_functions(comp, likelihood, unique=False)
-    negloglike, params_meas = test_all_Fisher.load_loglike(comp, likelihood, data_start, data_end, split=False)
+    negloglike, params_meas, Nconv, Niter, times = test_all_Fisher.load_loglike(comp, likelihood, data_start, data_end, split=False)
+    # print(Nconv, Niter, times, flush=True)
     max_param = params_meas.shape[1]
     
     all_inv_subs_proc = simplifier.load_subs(invsubs_file, max_param)[data_start:data_end]
@@ -74,10 +206,14 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
     all_fish = np.loadtxt(likelihood.out_dir + '/derivs_comp'+str(comp)+'.dat')   # 2D array of shape (# unique fcns, 10)
     all_fish = np.atleast_2d(all_fish)
 
+
     codelen = np.zeros(len(fcn_list_proc))              # Both of these are also just for this proc
     negloglike_all = np.zeros(len(fcn_list_proc))
     index_arr = np.zeros(len(fcn_list_proc))
     params = np.zeros([len(fcn_list_proc), max_param])
+    Nconv_all = np.zeros(len(fcn_list_proc))
+    Niter_all = np.zeros(len(fcn_list_proc))
+    times_all = np.zeros(len(fcn_list_proc))
 
     for i in range(len(fcn_list_proc)):                 # The part of all eqs analysed by this proc
         if i%print_frequency==0 and rank==0:
@@ -92,6 +228,9 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         index_arr[i] = index
 
         negloglike_all[i] = negloglike[index]           # Assign the likelihood of this variant to the that of the unique eq
+        Nconv_all[i] = Nconv[index]
+        Niter_all[i] = Niter[index]
+        times_all[i] = times[index]
 
         fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax)
 
@@ -132,6 +271,8 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 
         try:
             p, fish = simplifier.convert_params(measured, fish_measured, all_inv_subs_proc[i], n=max_param)
+            Sigma = 1/np.sqrt(fish)
+            # print('first Sigma', Sigma)
             if isinstance(p, float):
                 p=[p]
             p = np.atleast_1d(p)
@@ -139,25 +280,56 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             codelen[i] = np.inf
             continue
         
-        if np.sum(fish<=0)>0:
-            codelen[i] = np.inf
-            continue
+        # if np.sum(fish<=0)>0:
+        #     codelen[i] = np.inf
+        #     print('HERE')
+        #     continue
+
+        #If Sigma is not defined we need to compute it integrating
+        if (np.sum(Sigma <= 0.) > 0.) or (np.sum(np.isnan(Sigma)) > 0) or (np.sum(np.isinf(Sigma)) > 0):#  or (np.sum(Nsteps<1) > 0):
+            try:
+                eq_numpy = get_eq_numpy(nparams, fcn_i, try_integration, tmax)
+                loss_template = likelihood.get_loss(eq_numpy,  value = 'evaluate')
+                chi2_fcn =likelihood.get_wrapped_like(loss_template)
+            
+            except Exception:
+                print("BAD:", fcn_i, negloglike[index], np.isfinite(negloglike[index]))
+            
+            # print('Integrating', fcn_i, flush=True)
+            fop = get_fop(chi2_fcn, total_param=nparams)
+            Sigma = get_sigma_from_integral(p, Sigma, nparams, k, i, fcn_i, negloglike_all, nparams, max_param, get_fop(chi2_fcn, nparams), number_points=10**3)
+            # print('Sigma', Sigma, flush=True)
+            # print(p, flush=True)
+            if np.isnan(Sigma).any():
+                Sigma[np.isnan(Sigma)] = np.inf
+
+        fish = 1/Sigma**2
+        fish = np.concatenate((fish[:nparams], np.zeros(max_param - nparams)))
         
-        try:
-            Delta = np.zeros(fish.shape)
-            m = (fish != 0)
-            Delta[m] = np.atleast_1d(np.sqrt(12./fish[m]))
-            Delta[~m] = np.inf
-            Nsteps = np.atleast_1d(np.abs(np.array(p)))
-            m = (Delta != 0)
-            Nsteps[m] /= Delta[m]
-            Nsteps[~m] = np.nan
-        except:
-            print('Error with function:', fcn_i)
-            codelen[i] = np.inf
-            continue
+        # try:
+        p = np.append(p, np.zeros(max_param - len(p)))
+        Sigma = np.concatenate((Sigma[:nparams], np.zeros(max_param - nparams)))
+        Delta = np.zeros(Sigma.shape)
+        m = (Sigma != np.inf)
+        # Delta = np.zeros(fish.shape)
+        # m = (fish != 0)
+        # Delta[m] = np.atleast_1d(np.sqrt(12./fish[m]))
+        Delta[m] = np.atleast_1d(np.sqrt(12.)*Sigma[m])
+        Delta[~m] = np.inf
+        Nsteps = np.atleast_1d(np.abs(np.array(p)))
+        m = (Delta != 0)
+        Nsteps[m] /= Delta[m]
+        Nsteps[~m] = np.nan
+        Nsteps = Nsteps[:nparams]
+
+        # print(fcn_i, Delta, Nsteps)
+        # except:
+        #     print('Error with function:', fcn_i)
+        #     codelen[i] = np.inf
+        #     continue
         
         negloglike_orig = np.copy(negloglike_all[i])
+        p = p[:nparams]
         ptrue=np.copy(p)
         
         if np.sum(Nsteps<1)>0:         # should reevaluate -log(L) with the param(s) set to 0, but doesn't matter unless the fcn is a very good one
@@ -184,7 +356,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                     fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
                     if k==1:
                         eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
-                        negloglike_all[i] = f1(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
+                        negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
                     else:
                         all_a = ' '.join([f'a{i}' for i in range(nparams)])
                         all_a = list(sympy.symbols(all_a, real=True))
@@ -202,6 +374,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 kept_mask = Nsteps>=1
             else:
                 # Let's see if setting any of the parameters to zero is ok
+                # print(Nsteps)
                 try_idx = np.arange(nparams)[Nsteps < 1]
                 for r in reversed(range(1, len(try_idx))):
                     for idx in itertools.combinations(try_idx, r):
@@ -215,6 +388,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                             fop = get_fop(chi2_fcn, total_param=len(p))
                             negloglike_all[i] = fop(p)
                         if np.isfinite(negloglike_all[i]):
+                            Delta[np.argwhere(Nsteps<1)] = abs(p[np.argwhere(Nsteps<1)])
                             break
                 kept_mask = np.ones(len(p), dtype=bool)
                 if np.isfinite(negloglike_all[i]):
@@ -222,8 +396,12 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                     kept_mask[idx] = 0
                 elif not np.isfinite(negloglike_all[i]) and not np.isnan(negloglike_all[i]): # infinite nll
                     p = ptrue
+                    fish= fish[:nparams]
                     fish[Nsteps<1] = 12./(p[Nsteps<1]**2) # set uncertainty=parameter in this case
-                    codelen[i] = -k/2.*math.log(3.) + np.sum( 0.5*np.log(fish) + np.log(abs(np.array(p))) )
+                    Delta[np.argwhere(Nsteps<1)] = abs(p[np.argwhere(Nsteps<1)])
+                    # codelen[i] = -k/2.*math.log(3.) + np.sum( 0.5*np.log(fish) + np.log(abs(np.array(p))) )
+                    p = np.append(p, np.zeros(max_param - len(p)))
+                    codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p))/Delta))
                     negloglike_all[i] = negloglike_orig
                     try:        # If p was an array, we can make a list out of it
                         list_p = list(p)
@@ -244,17 +422,26 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             elif k==0:                  # If we have no parameters left then the parameter codelength is 0 so we can move on
                 continue
             
-            fish = fish[kept_mask]      # Only consider these parameters in the codelen
+            fish[:nparams] = fish[:nparams][kept_mask]      # Only consider these parameters in the codelen
+            # Delta = Delta[:nparams][kept_mask]
             p = p[kept_mask]
             
         else:
             kept_mask = np.ones(len(p), dtype=bool)
         
+        # print(fcn_i, p, Delta)
         
-        try:
-            codelen[i] = -k/2.*math.log(3.) + np.sum( 0.5*np.log(fish) + np.log(abs(np.array(p))) )
-        except:
-            codelen[i] = np.nan
+        # try:
+        # p = np.append(p, np.zeros(max_param - len(p)))
+            # codelen[i] = -k/2.*math.log(3.) + np.sum( 0.5*np.log(fish) + np.log(abs(np.array(p))) )
+        # Delta = Delta[:nparams]
+        Delta = Delta[:nparams][kept_mask]
+        # print('param', p)
+        # print('Delta', Delta)
+        # print(np.sum(np.log(abs(np.array(p))/Delta)))
+        codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p))/Delta))
+        # except:
+            # codelen[i] = np.nan
         
         p = ptrue
         p[~kept_mask]=0.
@@ -274,8 +461,18 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         # print(i, codelen[i], negloglike_all[i], flush=True)
         
 
-    # print(negloglike_all, codelen, index_arr, params, flush=True)
-    out_arr = np.transpose(np.vstack([negloglike_all, codelen, index_arr] + [params[:,i] for i in range(max_param)]))
+    # print(codelen, flush=True)
+
+    
+    
+    fcn_list_proc = np.array(fcn_list_proc)
+    # print(fcn_list_proc[np.argwhere(codelen == np.inf)])
+    # print(fcn_list_proc[np.argwhere(codelen == - np.inf)])
+    # print(codelen)
+    # out_arr = np.transpose(np.vstack([negloglike_all, codelen, index_arr] + [params[:,i] for i in range(max_param)]))
+
+    out_arr = np.vstack([negloglike_all, codelen, index_arr] + [params[:,i] for i in range(max_param)] + [Nconv_all, Niter_all, times_all])
+    out_arr = np.transpose(out_arr)
 
     np.savetxt(likelihood.temp_dir + '/codelen_matches_'+str(comp)+'_'+str(rank)+'.dat', out_arr, fmt='%.7e')        # Save the data for this proc in Partial
 

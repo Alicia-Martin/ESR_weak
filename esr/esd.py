@@ -96,6 +96,7 @@ class SurfaceDensity:
 
     @classmethod
     def calculate(cls, radii, density_func, num_points=120, radial_axis_to_broadcast=None, density_axis=-1, params=()):
+        # print('num', num_points)
         return cls(
             radii=radii,
             density_func=density_func,
@@ -173,6 +174,7 @@ class ExcessSurfaceDensity:
         if self.radial_axis_to_broadcast is not None:
             radii = np.moveaxis(radii, self.radial_axis_to_broadcast + 1, self.density_axis)
         thetas__ = atleast_kd(thetas_, rhos.ndim)
+        print(4 * radii * rhos / (4 * np.sin(thetas__) + 3 - np.cos(2 * thetas__)))
         return 4 * radii * rhos / (4 * np.sin(thetas__) + 3 - np.cos(2 * thetas__))
 
     def esd(self):
@@ -188,6 +190,10 @@ class ExcessSurfaceDensity:
         dthetas = np.gradient(thetas, axis=0)
         second_term_integrand = self._esd_second_term_integrand_func(thetas)
         second_term = trapz_(second_term_integrand, axis=0, dx=dthetas)
+        print('second term',second_term)    
+        sys.exit()
+
+        # print(np.sum((first_term - second_term)))
 
         return first_term - second_term
 
@@ -199,7 +205,7 @@ class ExcessSurfaceDensity:
             num_points=num_points,
             radial_axis_to_broadcast=radial_axis_to_broadcast,
             density_axis=density_axis,
-            params=params  # Add this line to pass the parameters
+            params=params
         ).esd()
 
 

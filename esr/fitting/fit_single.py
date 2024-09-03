@@ -59,7 +59,7 @@ def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5,
     fsym = fsym[fstr]
     print(fstr)
     # (2) Fit this function to the data
-    Niter = 100
+    Niter = 300
     Nconv = 20
     chi2, params, count_lowest, j, success = optimise_fun(fstr,
                             likelihood,

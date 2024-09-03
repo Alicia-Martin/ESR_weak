@@ -103,7 +103,8 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
             eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
         else:
             eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
-        ypred = likelihood.get_pred(measured, likelihood.xvar, eq_numpy)
+        # ypred = likelihood.get_pred(measured, likelihood.xvar, eq_numpy)
+        ypred = eq_numpy(likelihood.xvar, *measured)
         # except:
         #     if try_integration:
         #         fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
@@ -117,14 +118,15 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
         #     else:
         #         continue
 
-        esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
-
         axfig2.plot(likelihood.xvar, ypred, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i, label = fcn_i)
+        
 
+        x_array = np.linspace(likelihood.xvar.min(), likelihood.xvar.max(), 1000)
+        esd = ExcessSurfaceDensity.calculate(x_array, eq_numpy, params=measured)
         if np.isscalar(ypred):
-            ax1.plot(likelihood.xvar, [esd]*len(likelihood.xvar), color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
+            ax1.plot(x_array, [esd]*len(likelihood.xvar), color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
         else:
-            ax1.plot(likelihood.xvar, esd, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
+            ax1.plot(x_array, esd, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
         
     if hasattr(likelihood, 'yerr'):
         ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.', markersize=5, zorder=len(fcn_list)+1, capsize=1, elinewidth=1, color='k', alpha=1)
@@ -144,6 +146,7 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
     fig.tight_layout()
     fig.savefig(likelihood.fig_dir + '/plot_%i.png'%comp, dpi=300)
     fig.clf()
+    # plt.show()
     plt.close(fig)
 
     fig2.tight_layout()

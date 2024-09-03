@@ -45,10 +45,19 @@ def load_loglike(comp, likelihood, data_start, data_end, split=True):
     data = np.genfromtxt(likelihood.out_dir + "/negloglike_comp"+str(comp)+".dat")
     negloglike = np.atleast_1d(data[:,0])
     params = np.atleast_2d(data[:,1:])
+    Nconv = np.atleast_1d(data[:,-3])
+    Niter = np.atleast_1d(data[:,-2])
+    times = np.atleast_1d(data[:,-1])
+
+    # print(Nconv, Niter, times)
+
     if split:
         negloglike = negloglike[data_start:data_end]               # Assuming same order of fcn and chi2 files
         params = params[data_start:data_end,:]
-    return negloglike, params
+        Nconv = Nconv[data_start:data_end]
+        Niter = Niter[data_start:data_end]
+        times = times[data_start:data_end]
+    return negloglike, params, Nconv, Niter, times
 
 
 def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
@@ -88,7 +97,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         else:
             eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
     except Exception:
-        print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
+        # print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
         Fisher_diag = np.nan
         deriv[:] = np.nan
         return params, negloglike, deriv, codelen
@@ -96,6 +105,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     #likelihood
     loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
     chi2_fcn =likelihood.get_wrapped_like(loss_template)
+
 
     if nparam > 0:
         def fop(x):
@@ -114,6 +124,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
 
     if nparam == 0:
         codelen = 0
+        # print(fcn_i, 'no params', flush=True)
         return params, negloglike, deriv, codelen
 
     try:
@@ -124,69 +135,76 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         else:
             eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
     except Exception:
-        print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
+        # print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
         Fisher_diag = np.nan
         deriv[:] = np.nan
         return params, negloglike, deriv, codelen
     
     # Get Hessian
-    def get_deriv(Hmat, nparam, max_param=4, max_fun_param=4):
+    def get_deriv(Hmat, nparam, max_param=4):
+        # print('hola')
         Hmat_max = np.zeros((max_param,max_param))
         Hmat_max[:nparam, :nparam] = Hmat[:nparam, :nparam]
-        Hmat_max[max_fun_param:, :nparam] = Hmat[nparam:, :nparam]
-        Hmat_max[:nparam, max_fun_param:] = Hmat[:nparam, nparam:]
-        Hmat_max[max_fun_param:,max_fun_param:] = Hmat[nparam:, nparam:]
+        # print(Hmat_max)
+        # # Hmat_max[max_fun_param:, :nparam] = Hmat[nparam:, :nparam]
+        # # Hmat_max[:nparam, max_fun_param:] = Hmat[:nparam, nparam:]
+        # # Hmat_max[max_fun_param:,max_fun_param:] = Hmat[nparam:, nparam:]
 
         deriv = Hmat_max[np.triu_indices(max_param)]
         return deriv
-
     theta_ML = theta_ML[:nparam]
     hessian_template = likelihood.get_loss(eq_numpy, value = 'hessian')
-    Hmat2 = hessian_template(theta_ML, likelihood.xvar, likelihood.yvar, likelihood.yerr)
-
+    Hmat = hessian_template(theta_ML, likelihood.xvar, likelihood.yvar, likelihood.yerr)
+    
     #Other related quantities
-    Fisher_diag2 = jnp.diag(Hmat2)
-    Delta2 = np.sqrt(12./Fisher_diag2)
-    deriv2 = get_deriv(Hmat2, nparam, max_param=max_param, max_fun_param=4)
-    Nsteps2 = abs(np.array(theta_ML))/Delta2
-    # print('Hmat', Hmat2, flush=True)
-    # print('Delta', Delta, flush=True)
+    Fisher_diag = jnp.diag(Hmat)
+    Delta = np.sqrt(12./Fisher_diag)
+    print('Delta', Delta)
+    deriv = get_deriv(Hmat, nparam, max_param=max_param)
+    Nsteps = abs(np.array(theta_ML))/Delta
+
+    # Hfun2 = nd.Hessian(fop)
+    # Hmat2 = Hfun2(theta_ML)
+    # Fisher_diag2 = jnp.diag(Hmat2)
+    # Delta2 = np.sqrt(12./Fisher_diag2)
+    # print('Delta2', Delta2)
+
+    # print(fcn_i, Delta)
 
 
-    Hfun = nd.Hessian(fop)
-    Hmat = Hfun(theta_ML)
-    print('Hmat', Hmat, flush=True)
-    print('Hmat2', Hmat2, flush=True)
-    print('Delta', Delta2, flush=True)
-
-    #Plot likelihood
-    Delta_plot = Delta2
-    x_range = np.linspace(theta_ML - Delta_plot, theta_ML + Delta_plot, 10**4)
-    # x_range = np.append(x_range, theta_ML)
     loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
     chi2_fcn = likelihood.get_wrapped_like(loss_template)
 
-    grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
-    grad_fcn = likelihood.get_wrapped_like(grad_template)
 
-    nll = []
-    grads = []
-    for i in x_range:
-        negloglike = chi2_fcn([i], xvar, yvar, yerr)
-        nll = np.append(nll, negloglike)
+    #Plot likelihood
+    # Delta_plot = 5
+    # x_range = np.linspace(theta_ML - Delta_plot, theta_ML + Delta_plot, 10**2)
+    # # x_range = np.append(x_range, theta_ML)
+    # loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
+    # chi2_fcn = likelihood.get_wrapped_like(loss_template)
 
-        grad = grad_fcn(np.array([i]), xvar, yvar, yerr)
-        grads = np.append(grads, grad)
+    # # grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
+    # # grad_fcn = likelihood.get_wrapped_like(grad_template)
+
+    # nll = []
+    # # grads = []
+    # for i in x_range:
+    #     negloglike = chi2_fcn([i], xvar, yvar, yerr)
+    #     nll = np.append(nll, negloglike)
+    #     # print(nll)
+
+    #     # grad = grad_fcn(np.array([i]), xvar, yvar, yerr)
+    #     # grads = np.append(grads, grad)
 
         
+    # # print(jnp.min(nll))
+    # plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
+    # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
+    # plt.show()
 
-    plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
-    plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
-    plt.show()
-
-    plt.plot(x_range, grads)
-    plt.plot(theta_ML,grad_fcn(theta_ML, xvar, yvar, yerr) , 'ro')
-    plt.show()
+    # plt.plot(x_range, grads)
+    # plt.plot(theta_ML,grad_fcn(theta_ML, xvar, yvar, yerr) , 'ro')
+    # plt.show()
     
     # 2nd derivatives of -log(L) wrt params
     Fisher_diag = np.array([Hmat[i,i] for i in range(nparam)])
@@ -194,76 +212,6 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # Precision to know constants
     Delta = np.sqrt(12./Fisher_diag)
     Nsteps = abs(np.array(theta_ML))/Delta
-    
-    for i in range(nparam):
-        start = int(i * max_param - (i - 1) * i / 2)
-        deriv[start:start+nparam-i] = Hmat[i,i:]
-    
-    n_iter = len(d_list)*len(method_list)
-    if (np.sum(Fisher_diag <= 0.) > 0.) or (np.sum(np.isnan(Fisher_diag)) > 0) or (np.sum(np.isinf(Fisher_diag)) > 0):#  or (np.sum(Nsteps<1) > 0):
-       Fisher_array = np.empty((n_iter, nparam))
-       Hmat_array = np.empty((n_iter, nparam, nparam))
-       e = 0
-       for d2, meth in itertools.product(d_list, method_list):
-           if use_relative_dx:
-               Hfun = nd.Hessian(fop, step = np.abs(d2*theta_ML)+1.e-15, method=meth)
-           else:
-               Hfun = nd.Hessian(fop, step = d2, method=meth)
-           Hmat = Hfun(theta_ML)
-           Hmat_array[e] = Hmat
-           e += 1
-           
-       Hmat_array_f = [] # filter array
-       for matrix in Hmat_array:
-           if not np.any(np.isnan(matrix)) and not np.any(np.isinf(matrix)) and np.all(np.diagonal(matrix) > 0):
-               Hmat_array_f.append(matrix)
-       Hmat_array_f = np.array(Hmat_array_f)
-       Fisher_array = np.array([np.array([mat[i,i] for i in range(nparam)]) for mat in Hmat_array_f])
-       Delta_array = np.sqrt(12./Fisher_array)
-       Delta_array_round = [[format(num, ".3e") for num in row] for row in Delta_array]
-       Delta_array_round = np.array(Delta_array_round, dtype=float)
-       if len(Delta_array_round.shape) < 2:
-           repeated_elements_exist = False
-       else:
-           repeated_elements_exist = len(Delta_array_round[:,0]) != len(set(Delta_array_round[:,0]))
-       
-       if repeated_elements_exist:
-           Delta_mode = mode(Delta_array_round)[0][0]
-           mode_ind = np.where(Delta_array_round == Delta_mode)[0][0]
-           Fisher_diag = np.atleast_1d(Fisher_array[mode_ind])
-           # Delta, Nsteps = np.atleast_1d(Delta_array[mode_ind]), np.atleast_1d(Nsteps_array[mode_ind])
-           Delta = np.sqrt(12./Fisher_diag)
-           Nsteps = abs(np.array(theta_ML))/Delta
-           for i in range(nparam):
-               start = int(i * max_param - (i - 1) * i / 2)
-               deriv[start:start+nparam-i] = Hmat_array_f[mode_ind][i,i:]
-       
-       else: # try again with less precision
-           Delta_array_round = [[format(num, ".1e") for num in row] for row in Delta_array]
-           Delta_array_round = np.array(Delta_array_round, dtype=float)
-           if len(Delta_array_round.shape) < 2:
-               repeated_elements_exist = False
-           else:
-               repeated_elements_exist = len(Delta_array_round[:,0]) != len(set(Delta_array_round[:,0]))
-           if not repeated_elements_exist:
-               codelen = np.nan
-               return params, negloglike, deriv, codelen
-           else:
-               Delta_mode = mode(Delta_array_round)[0][0]
-               mode_ind = np.where(Delta_array_round == Delta_mode)[0][0]
-               Fisher_diag = np.atleast_1d(Fisher_array[mode_ind])
-               Delta = np.sqrt(12./Fisher_diag)
-               Nsteps = abs(np.array(theta_ML))/Delta               
-               for i in range(nparam):
-                   start = int(i * max_param - (i - 1) * i / 2)
-                   deriv[start:start+nparam-i] = Hmat_array_f[mode_ind][i,i:]
-                
-    print('delta fop', Delta)
-    print('Delta2', Delta2)
-
-    if np.abs(Delta - Delta2)> 1e-2:
-        print('delta fop', Delta)
-        print('Delta2', Delta2)
 
     # Must indicate a bad fcn, so just need to make sure it doesn't have a good -log(L)
     if (np.sum(Fisher_diag <= 0.) > 0.) or (np.sum(np.isnan(Fisher_diag)) > 0):
@@ -272,6 +220,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         return params, negloglike, deriv, codelen
     
     k = nparam
+    # print(fcn_i, k)
     theta_ML_orig = np.copy(theta_ML)
     negloglike_orig = np.copy(negloglike)
 
@@ -337,6 +286,8 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     #Save params
     params[:] = np.pad(theta_ML, (0, max_param-len(theta_ML)))
 
+    print('codelen', codelen)
+
     return params, negloglike, deriv, codelen
 
     
@@ -365,7 +316,7 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
         sys.setrecursionlimit(2000 + 500 * (comp - 8))
 
     fcn_list_proc, data_start, data_end = test_all.get_functions(comp, likelihood)
-    negloglike, params_proc = load_loglike(comp, likelihood, data_start, data_end)
+    negloglike, params_proc, Nconv_proc, Niter_proc, times_proc = load_loglike(comp, likelihood, data_start, data_end)
     max_param = params_proc.shape[1]
 
     codelen = np.zeros(len(fcn_list_proc))          # This is now only for this proc
@@ -381,6 +332,8 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
             continue
 
         theta_ML = params_proc[i,:]
+
+        print(i)
             
         try:
             fcn_i = fcn_list_proc[i].replace('\n', '')
@@ -406,7 +359,10 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
 
         print(fcn_i, negloglike[i], codelen[i], flush=True)
         
-    out_arr = np.transpose(np.vstack([codelen, negloglike] + [params[:,i] for i in range(max_param)]))
+    # out_arr = np.transpose(np.vstack([codelen, negloglike] + [params[:,i] for i in range(max_param)]))
+
+    out_arr = np.vstack([codelen, negloglike] + [params[:, i] for i in range(max_param)] + [Nconv_proc, Niter_proc, times_proc])
+    out_arr = np.transpose(out_arr)
 
     out_arr_deriv = np.transpose(np.vstack([deriv[:,0], deriv[:,1], deriv[:,2], deriv[:,3], deriv[:,4], deriv[:,5], deriv[:,6], deriv[:,7], deriv[:,8], deriv[:,9]]))
     out_arr_deriv = np.transpose(np.vstack([deriv[:,i] for i in range(deriv.shape[1])]))
