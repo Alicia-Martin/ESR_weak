@@ -57,7 +57,8 @@ def plot_single(fcn, measured, likelihood, max_param=4, tmax=5, try_integration=
 
     
         # esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
-        esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
+        x_array = np.linspace(likelihood.xvar.min(), likelihood.xvar.max(), 1000)
+        esd = ExcessSurfaceDensity.calculate(x_array, eq_numpy, params=measured)
 
 
         # measured = [-10**(6), 1]
@@ -75,7 +76,7 @@ def plot_single(fcn, measured, likelihood, max_param=4, tmax=5, try_integration=
         # sys.exit(0)
 
         # Plot the ESD on the first figure
-        ax1.plot(likelihood.xvar, esd)
+        ax1.plot(x_array, esd)
         ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.')
         ax1.set_xscale(xscale)
         ax1.set_yscale(yscale)
@@ -134,7 +135,7 @@ def run_fit_single(data_file, run_name, fn, log_opt, method):
                                                         log_opt=log_opt,
                                                         return_params=True)
         
-        # plot_single(fn, params, likelihood)
+        plot_single(fn, params, likelihood)
         return chi2, params, DL
 
 
@@ -194,7 +195,7 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
 # run code for one fucntion
 #------------------------------------------------------------
 
-method = "BFGS"
+method = "Nelder-Mead"
 log_opt = False
 data_file = 'XXL/6.pickle'
 run_name = 'WL'
@@ -217,7 +218,8 @@ run_name = 'WL'
 # fn = 'pow(Abs(a0),(1/x))/x'
 # fn = 'x/pow(Abs(a0),x)'
 # fn = 'a0/(a1 - x) + a2'
-fn = 'a0'
+# fn = ' + a0/x**7'
+fn = 'a0 + a1*x'
 
 if rank == 0:
     print('method:', method, ', log_opt:', log_opt, flush=True)

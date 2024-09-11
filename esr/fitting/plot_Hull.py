@@ -53,7 +53,7 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
         os.mkdir(likelihood.fig_dir)
 
     data = []
-    for comp in range(5, 9):
+    for comp in range(4, 6):
         with open(likelihood.out_dir + '/final_'+str(comp)+'.dat', "r") as f:
             reader = csv.reader(f, delimiter=';')
             data_comp = [row for row in reader]
@@ -74,7 +74,7 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
     DL_min = np.amin(DL[np.isfinite(DL)])
     alpha = DL_min - DL
     alpha = np.exp(alpha)
-    # m = (alpha > vmin)
+    m = (alpha > vmin)
     # fcn_list = [d for i, d in enumerate(fcn_list) if m[i]]
     # params = params[m,:]
     # alpha = alpha[m]
@@ -97,33 +97,28 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
 
 
     #Add NFW to the list
-    fcn_NFW = 'a0/(x*(x + a1))^2'
-    fcn_list += [fcn_NFW]
-    params_NFW = np.array([377.45399758, 3.36153469, 0, 0])
-    DL_NFW = 45.665482161689106
-    alpha_NFW = DL_min - DL_NFW
-    alpha_NFW = np.exp(alpha_NFW)
+    # fcn_NFW = 'a0/(x*(x + a1))^2'
+    # fcn_list += [fcn_NFW]
+    # params_NFW = np.array([377.45399758, 3.36153469, 0, 0])
+    # DL_NFW = 45.665482161689106
+    # alpha_NFW = DL_min - DL_NFW
+    # alpha_NFW = np.exp(alpha_NFW)
 
-    params = np.vstack([params, params_NFW])
-    DL = np.append(DL, DL_NFW)
-    alpha = np.append(alpha, alpha_NFW)
+    # params = np.vstack([params, params_NFW])
+    # DL = np.append(DL, DL_NFW)
+    # alpha = np.append(alpha, alpha_NFW)
 
-    #Table
-    # Creating the header for the table
-    # headers = ["Function", "DL", "a0", "a1"]
-    # two_params = params[:, :2]
+    # Table
+    headers = ["Function", "DL", "a0", "a1"]
+    two_params = params[:, :2]
+    table_data = []
+    for i in range(len(fcn_list)):
+        row = [fcn_list[i], DL[i]] + two_params[i].tolist()
+        table_data.append(row)
+    table = tabulate(table_data, headers=headers, tablefmt="pretty")
 
-    # # Preparing data for the table
-    # table_data = []
-    # for i in range(len(fcn_list)):
-    #     row = [fcn_list[i], DL[i]] + two_params[i].tolist()
-    #     table_data.append(row)
-
-    # # Creating the table
-    # table = tabulate(table_data, headers=headers, tablefmt="pretty")
-
-    # print(table)
-    # sys.exit()
+    print(table)
+    sys.exit()
 
 
 

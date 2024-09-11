@@ -75,19 +75,21 @@ class WLLikelihood(Likelihood):
         # @profile
 
         def check_density(params, eq_numpy, r):
+            #this is wrong, it's cheacking the density at the projected radius not the 3d radius
+            xs = jnp.linspace(0, r[-1], 200)
+            # sys.exit()
             if len(params) == 0:
-                wrapped_eq_diff = eq_numpy(r)
+                wrapped_eq_diff = eq_numpy(xs)
             else:
-                wrapped_eq_diff = eq_numpy(r, *params)
+                wrapped_eq_diff = eq_numpy(xs, *params)
             return jnp.where(jnp.all(wrapped_eq_diff >= 0), 0, np.inf)
         
         def f_loss(a, xvar, yvar, yerr):
             ypred = self.get_pred(a, xvar, eq_numpy)
-
             #check that the density is positive
             negloglike = 0
             # negloglike += check_density(a, eq_numpy, xvar)
-
+            # jax.debug.print('check_like {x}', x = negloglike)
 
             def neg_log_gaussian(x, mean, std):
                 return (x - mean)**2/(2*std**2)
@@ -97,8 +99,7 @@ class WLLikelihood(Likelihood):
 
             negloglike += nll
 
-            # jax.debug.print('{x}', x = negloglike)
-            
+            jax.debug.print('{x}', x = negloglike)
             return negloglike
         
         if value == 'hessian':

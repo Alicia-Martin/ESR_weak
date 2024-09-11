@@ -105,18 +105,6 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
             eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
         # ypred = likelihood.get_pred(measured, likelihood.xvar, eq_numpy)
         ypred = eq_numpy(likelihood.xvar, *measured)
-        # except:
-        #     if try_integration:
-        #         fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
-        #         if k > 0:
-        #             all_a = ' '.join([f'a{i}' for i in range(k)])
-        #             all_a = list(sympy.symbols(all_a, real=True))
-        #             eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
-        #         else:
-        #             eq_numpy = sympy.lambdify([x], eq, modules=["numpy"])
-        #             ypred = likelihood.get_pred(likelihood.xvar, measured, eq_numpy)
-        #     else:
-        #         continue
 
         axfig2.plot(likelihood.xvar, ypred, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i, label = fcn_i)
         

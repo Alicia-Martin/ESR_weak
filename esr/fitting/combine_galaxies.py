@@ -35,6 +35,7 @@ def main(comp, likelihood):
             Nconv = data[:,-3].reshape(-1,1)
             Niter = data[:,-2].reshape(-1,1)
             times = data[:,-1].reshape(-1,1)
+            comp = np.array([i]*len(negloglike_value)).reshape(-1,1)
 
             if Nconv == 0:
                 not_conv_count += 1
@@ -59,9 +60,9 @@ def main(comp, likelihood):
 
         # Process your data and calculate L, then save to a CSV file
         L = [neg + code + ai for neg, code, ai in zip(negloglike, codelen, aifeyn)]
-        sorted_data = sorted(zip(fcn, L, negloglike, codelen, aifeyn, Nconv, Niter, times, not_conv_count), key=lambda x: x[1])
+        sorted_data = sorted(zip(fcn, L, negloglike, codelen, aifeyn, comp, Nconv, Niter, times, not_conv_count), key=lambda x: x[1])
         ptab = PrettyTable()
-        ptab.field_names = ["Function", "L(D)", "-logL", "Codelen", "AIFeyn", "Nconv", "Niter", "Time", "not_conv_count"]
+        ptab.field_names = ["Function", "L(D)", "-logL", "Codelen", "AIFeyn", "comp", "Nconv", "Niter", "Time", "not_conv_count"]
 
         # for n in range(len(negloglike)):
         # for n, (fcn, L, negloglike, codelen, aifeyn_value) in enumerate(sorted_data):
@@ -77,15 +78,15 @@ def main(comp, likelihood):
 
         # print(ptab)
 
-        for n, (function, l_d, negloglike_value, codelen_value, aifeyn_value, Nconv_value, Niter_value, times_value, not_conv_value) in enumerate(sorted_data):
+        for n, (function, l_d, negloglike_value, codelen_value, aifeyn_value, comp_value, Nconv_value, Niter_value, times_value, not_conv_value) in enumerate(sorted_data):
             if negloglike_value != 0:
-                data = [n, function, l_d, n, negloglike_value, codelen_value, aifeyn_value, Nconv_value, Niter_value, times_value, not_conv_value]
+                data = [n, function, l_d, n, negloglike_value, codelen_value, aifeyn_value, comp_value, Nconv_value, Niter_value, times_value, not_conv_value]
                 data[1] = np.char.rstrip(data[1], '\n')
 
                 with open('fitting/output/combine_final_' + str(i) + '.dat', 'a') as f:
                     writer = csv.writer(f, delimiter=';')
                     writer.writerow(data)
 
-                ptab.add_row([function, '%.2f'%l_d, '%.2f'%negloglike_value, '%.2f'%codelen_value, '%.2e'%aifeyn_value])
+                ptab.add_row([function, '%.2f'%l_d, '%.2f'%negloglike_value, '%.2f'%codelen_value, '%.2e'%aifeyn_value, comp_value])
 
     print(ptab)
