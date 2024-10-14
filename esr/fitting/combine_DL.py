@@ -71,6 +71,7 @@ def main(comp, likelihood, print_frequency=1000):
     Nconv_min = np.zeros(len(fcn_list_proc))
     Niter_min = np.zeros(len(fcn_list_proc))
     time_min = np.zeros(len(fcn_list_proc))
+    index_all_equations = np.zeros(len(fcn_list_proc))
 
     xarr = np.linspace(0, len(fcn_list)-1, len(fcn_list)).astype(int)           # Indices of all the unique fcns, which are what we're looping over
     xarr_proc = xarr[data_start:data_end]        # Which unique function indices this proc will look at
@@ -78,25 +79,29 @@ def main(comp, likelihood, print_frequency=1000):
     for i in range(len(fcn_list_proc)):          # Loop over all unique fcns to find variant with min codelength
         if rank==0 and i%print_frequency==0:
             print(f'{i+1} of {len(fcn_list_proc)}', flush=True)
-            
-        negloglike_i, codelen_i, aifeyn_i = negloglike[index==xarr_proc[i]], codelen[index==xarr_proc[i]], aifeyn[index==xarr_proc[i]]           # Arrays of all variants for this unique fcn
-        Nconv_i = Nconv[index==xarr_proc[i]]
-        Niter_i = Niter[index==xarr_proc[i]]
-        time_i = time[index==xarr_proc[i]]
 
-        m = (index==xarr_proc[i])
-        fcn_list_all_i = [fcn_list_all[j] for j in range(len(m)) if m[j]]
-        params_i = params[index==xarr_proc[i], :]
-        DL = negloglike_i + codelen_i + aifeyn_i
-        
-        if np.sum(~np.isnan(DL))==0:
+        mask = (index == xarr_proc[i])
+        negloglike_i, codelen_i, aifeyn_i = negloglike[mask], codelen[mask], aifeyn[mask]  # Arrays of all variants
+        Nconv_i, Niter_i, time_i = Nconv[mask], Niter[mask], time[mask]
+        fcn_list_all_i = [fcn_list_all[j] for j in range(len(mask)) if mask[j]]  # All corresponding fcns
+        params_i = params[mask, :]
+        DL = negloglike_i + codelen_i + aifeyn_i  # Calculate DL
+
+        # If all DL values are NaN, skip this equation
+        if np.sum(~np.isnan(DL)) == 0:
             DL_min[i] = np.nan
             continue
 
+        # Find the minimum DL and corresponding params and function
         DL_min[i] = np.nanmin(DL)
-        params_min[i,:] = params_i[np.nanargmin(DL),:]
-        fcn_min[i] = fcn_list_all_i[np.nanargmin(DL)]
-        
+        min_idx_local = np.nanargmin(DL) 
+        params_min[i, :] = params_i[min_idx_local, :] 
+        fcn_min[i] = fcn_list_all_i[min_idx_local] 
+
+        # Map the local index back to the global index in the 'index' array
+        global_idx_list = np.where(mask)[0]
+        index_all_equations[i] = global_idx_list[min_idx_local] 
+
         negloglike_min[i] = negloglike_i[np.nanargmin(DL)]
         codelen_min[i] = codelen_i[np.nanargmin(DL)]
         aifeyn_min[i] = aifeyn_i[np.nanargmin(DL)]
@@ -104,13 +109,16 @@ def main(comp, likelihood, print_frequency=1000):
         Niter_min[i] = Niter_i[np.nanargmin(DL)]
         time_min[i] = time_i[np.nanargmin(DL)]
 
-    # out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min]))
-    # print(negloglike_min)
+        # out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min]))
+        # print(negloglike_min)
+     
+
     out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min] + [Nconv_min, Niter_min, time_min]))
     prefix = likelihood.combineDL_prefix
 
     np.savetxt(likelihood.temp_dir + '/'+prefix+str(comp)+'_'+str(rank)+'.dat', out_arr, fmt='%.16e')        # Save the data for this proc in Partial
     np.savetxt(likelihood.temp_dir + '/'+prefix+'fcn_'+str(comp)+'_'+str(rank)+'.dat', fcn_min, fmt="%s")
+    np.savetxt(likelihood.temp_dir + '/'+prefix+'index_variants_'+str(comp)+'_'+str(rank)+'.dat', index_all_equations, fmt="%d")        # Save the index of the best function in all equations
     # One per unique eqn, but I save the form in "all" that gives the lowest DL
 
     comm.Barrier()
@@ -124,6 +132,11 @@ def main(comp, likelihood, print_frequency=1000):
         string = 'cat `find ' + likelihood.temp_dir + '/ -name "'+prefix+'fcn_'+str(comp)+'_*.dat" | sort -V` > ' + likelihood.out_dir + '/'+prefix+'fcn_comp'+str(comp)+'.dat'
         os.system(string)
         string = 'rm ' + likelihood.temp_dir + '/'+prefix+'fcn_'+str(comp)+'_*.dat'
+        os.system(string)
+
+        string = 'cat `find ' + likelihood.temp_dir + '/ -name "'+prefix+'index_variants_'+str(comp)+'_*.dat" | sort -V` > ' + likelihood.out_dir + '/'+prefix+'index_variants_comp'+str(comp)+'.dat'
+        os.system(string)
+        string = 'rm ' + likelihood.temp_dir + '/'+prefix+'index_variants_'+str(comp)+'_*.dat'
         os.system(string)
         
     if rank==0:         # The rest is done by just one proc
@@ -150,6 +163,7 @@ def main(comp, likelihood, print_frequency=1000):
             fcn_min = f.read().splitlines()
 
         mask = ~np.isnan(DL_min)
+
 
         xarr = np.linspace(0, len(fcn_list)-1, len(fcn_list)).astype(int)           # fcn_list should be as it was read in at the top
 
@@ -203,6 +217,7 @@ def main(comp, likelihood, print_frequency=1000):
         names += ["Nconv", "Niter", "Time"]
         ptab.field_names = names
 
+        print(len(DL_sort))
         for i in range(len(DL_sort)):
             
             # Only happens for non-duplicates; all Prels should be non-zero

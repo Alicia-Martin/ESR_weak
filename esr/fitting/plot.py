@@ -81,9 +81,9 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
     norm = mpl.colors.LogNorm(vmin=vmin,vmax=vmax)
 
     fig2 = plt.figure(figsize=(7,5))
-    axfig2  = fig2.add_axes([0.10,0.10,0.70,0.85])
+    ax2  = fig2.add_axes([0.10,0.10,0.70,0.85])
 
-    for i in range(min(len(fcn_list),50)):
+    for i in range(min(len(fcn_list),10)):
 
         fcn_i = fcn_list[i].replace('\'', '')
         
@@ -106,15 +106,19 @@ def main(comp, likelihood, tmax=5, try_integration=False, xscale='linear', yscal
         # ypred = likelihood.get_pred(measured, likelihood.xvar, eq_numpy)
         ypred = eq_numpy(likelihood.xvar, *measured)
 
-        axfig2.plot(likelihood.xvar, ypred, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i, label = fcn_i)
-        
-
+        #Plot the ESD on the first figure        
         x_array = np.linspace(likelihood.xvar.min(), likelihood.xvar.max(), 1000)
         esd = ExcessSurfaceDensity.calculate(x_array, eq_numpy, params=measured)
         if np.isscalar(ypred):
             ax1.plot(x_array, [esd]*len(likelihood.xvar), color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
         else:
             ax1.plot(x_array, esd, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i)
+
+        #Plot density
+        if np.isscalar(ypred):
+            ax2.plot(x_array, [ypred]*len(x_array), color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i, label = fcn_i)
+        else:
+            ax2.plot(x_array, ypred, color=cmap(norm(alpha[i])), zorder=len(fcn_list)-i, label = fcn_i)
         
     if hasattr(likelihood, 'yerr'):
         ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.', markersize=5, zorder=len(fcn_list)+1, capsize=1, elinewidth=1, color='k', alpha=1)

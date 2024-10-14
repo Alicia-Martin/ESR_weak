@@ -131,25 +131,25 @@ def fit_nfw(xvar, yvar, yerr):
 
 
 # Set the cosmology
-cosmo = cosmology.setCosmology('planck15')
+# cosmo = cosmology.setCosmology('planck15')
 
-with open('esr/dark_matter_data.txt', 'r') as file:
-        lines = file.readlines()
+# with open('esr/dark_matter_data.txt', 'r') as file:
+#         lines = file.readlines()
 
-# Extract the data
-xvar = np.array([float(value) for value in lines[0].strip().split(', ')])
-yvar = np.array([float(value) for value in lines[1].strip().split(', ')])
-yerr = np.array([float(value) for value in lines[2].strip().split(', ')])
+# # Extract the data
+# xvar = np.array([float(value) for value in lines[0].strip().split(', ')])
+# yvar = np.array([float(value) for value in lines[1].strip().split(', ')])
+# yerr = np.array([float(value) for value in lines[2].strip().split(', ')])
 
-cuts = (xvar <= 3/0.7) & (xvar >= 0.3/0.7)
-xvar = xvar[cuts]
-yvar = yvar[cuts]
-yerr = yerr[cuts]
+# cuts = (xvar <= 3/0.7) & (xvar >= 0.3/0.7)
+# xvar = xvar[cuts]
+# yvar = yvar[cuts]
+# yerr = yerr[cuts]
 
-d = np.sum(yvar/(yerr)**2)/np.sum(1/(yerr)**2)
-sigma = 1/np.sqrt(np.sum(1/yerr**2))
-SNR_i = d/sigma
-print(SNR_i)
+# d = np.sum(yvar/(yerr)**2)/np.sum(1/(yerr)**2)
+# sigma = 1/np.sqrt(np.sum(1/yerr**2))
+# SNR_i = d/sigma
+# print(SNR_i)
 
 # params = fit_nfw(xvar, yvar, yerr)
 
@@ -189,8 +189,13 @@ for file_path in pickle_files:
     # print(cluster_name, SNR_i)
 
     #Calculate SNR for the entire range
-    d = np.sum(data['ds']/(data['ds_err'])**2)/np.sum(1/(data['ds_err'])**2)
-    sigma = 1/np.sqrt(np.sum(1/data['ds_err']**2))
+    #don't use data points that are nan
+    no_nans = np.isnan(data['ds']) == False
+    d = np.sum(data['ds'][no_nans]/(data['ds_err'][no_nans])**2)/np.sum(1/(data['ds_err'][no_nans])**2)
+    # d = np.sum(data['ds']/(data['ds_err'])**2)/np.sum(1/(data['ds_err'])**2)
+    # print(cluster_name, d)
+    sigma = 1/np.sqrt(np.sum(1/data['ds_err'][no_nans]**2))
+    # print(cluster_name, sigma)
     SNR_i = d/sigma
 
     # print(cluster_name, SNR_i)
@@ -213,9 +218,69 @@ filtered_clusters = [cluster for _, cluster in filtered_SNRs_clusters]
 
 # Now sort based on the absolute values of the filtered SNRs
 sorted_clusters = [cluster for _, cluster in sorted(zip(filtered_SNRs, filtered_clusters), key=lambda x: abs(x[0]), reverse=True)]
-# sorted_SNRs = sorted(filtered_SNRs, key=abs, reverse=True)
-print(sorted_clusters)
+sorted_SNRs = sorted(filtered_SNRs, key=abs, reverse=True)
 print(len(sorted_clusters))
+print(sorted_SNRs)
+#count how many clusters have SNR < 1
+count = 0
+for snr in sorted_SNRs:
+    if np.abs(snr) < 1:
+        count += 1
+
+print(count, len(sorted_SNRs))
+print(np.mean(sorted_SNRs))
+
+sys.exit()
+
+#save SNR to a file
+with open('SNR.txt', 'w') as f:
+    for snr in sorted_SNRs:
+        f.write(f"{snr}\n")
+
+
+# Folder path and file paths
+folder_path = 'XXL'
+output_file = 'most_clusters.txt'
+output_all = 'all_clusters.txt'
+existing_file = '10_clusters.txt'
+
+# Read the content of 10_clusters.txt if it exists
+if os.path.exists(existing_file):
+    with open(existing_file, 'r') as f:
+        existing_names = set(line.strip() for line in f.readlines())
+else:
+    existing_names = set()
+
+print(f"Found {len(existing_names)} existing names.")
+
+# Get the file names from the folder, removing the '.pickle' extension
+file_names = []
+all_files = []
+for file_name in sorted_clusters:
+    # if file_name.endswith('.pickle'):
+    #     name_without_extension = os.path.splitext(file_name)[0]
+
+        all_files.append(file_name)
+        if file_name not in existing_names:
+            file_names.append(file_name)
+
+
+print('hola', len(all_files))
+# print(all_files)
+# print(file_names)
+# Save the new file names to the output file
+if file_names:
+    with open(output_file, 'a') as f:
+        for name in file_names:
+            f.write(f"{name}\n")
+        
+    print(f"Added {len(file_names)} new names to {output_file}.")
+else:
+    print("No new names to add.")
+
+with open(output_all, 'a') as f:
+    for name in all_files:
+        f.write(f"{name}\n")
 
 
 

@@ -7,13 +7,14 @@ import warnings
 import os
 import sys
 import itertools
-import numdifftools as nd
+# import numdifftools as nd
 from scipy.stats import mode
 import jax.numpy as jnp
 
 import esr.fitting.test_all as test_all
 from esr.fitting.sympy_symbols import *
 import esr.generation.simplifier as simplifier
+
 
 import matplotlib.pyplot as plt
 
@@ -44,12 +45,10 @@ def load_loglike(comp, likelihood, data_start, data_end, split=True):
         print(likelihood.out_dir + "/negloglike_comp"+str(comp)+".dat")
     data = np.genfromtxt(likelihood.out_dir + "/negloglike_comp"+str(comp)+".dat")
     negloglike = np.atleast_1d(data[:,0])
-    params = np.atleast_2d(data[:,1:])
+    params = np.atleast_2d(data[:,1:-3])
     Nconv = np.atleast_1d(data[:,-3])
     Niter = np.atleast_1d(data[:,-2])
     times = np.atleast_1d(data[:,-1])
-
-    # print(Nconv, Niter, times)
 
     if split:
         negloglike = negloglike[data_start:data_end]               # Assuming same order of fcn and chi2 files
@@ -159,7 +158,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     #Other related quantities
     Fisher_diag = jnp.diag(Hmat)
     Delta = np.sqrt(12./Fisher_diag)
-    print('Delta', Delta)
+    # Delta = theta_ML
     deriv = get_deriv(Hmat, nparam, max_param=max_param)
     Nsteps = abs(np.array(theta_ML))/Delta
 
@@ -169,26 +168,27 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # Delta2 = np.sqrt(12./Fisher_diag2)
     # print('Delta2', Delta2)
 
-    # print(fcn_i, Delta)
+    print(fcn_i, Delta)
 
 
     loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
     chi2_fcn = likelihood.get_wrapped_like(loss_template)
 
 
-    #Plot likelihood
+    # #Plot likelihood
     # Delta_plot = 5
     # x_range = np.linspace(theta_ML - Delta_plot, theta_ML + Delta_plot, 10**2)
     # # x_range = np.append(x_range, theta_ML)
     # loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
     # chi2_fcn = likelihood.get_wrapped_like(loss_template)
 
-    # # grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
-    # # grad_fcn = likelihood.get_wrapped_like(grad_template)
+    # grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
+    # grad_fcn = likelihood.get_wrapped_like(grad_template)
 
     # nll = []
     # # grads = []
     # for i in x_range:
+
     #     negloglike = chi2_fcn([i], xvar, yvar, yerr)
     #     nll = np.append(nll, negloglike)
     #     # print(nll)
@@ -201,6 +201,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
     # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
     # plt.show()
+    # sys.exit()
 
     # plt.plot(x_range, grads)
     # plt.plot(theta_ML,grad_fcn(theta_ML, xvar, yvar, yerr) , 'ro')
@@ -209,8 +210,8 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # 2nd derivatives of -log(L) wrt params
     Fisher_diag = np.array([Hmat[i,i] for i in range(nparam)])
     
-    # Precision to know constants
-    Delta = np.sqrt(12./Fisher_diag)
+    # Precision to known constants
+    # Delta = np.sqrt(12./Fisher_diag)
     Nsteps = abs(np.array(theta_ML))/Delta
 
     # Must indicate a bad fcn, so just need to make sure it doesn't have a good -log(L)
@@ -225,6 +226,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     negloglike_orig = np.copy(negloglike)
 
     # See whether we can snap any parameters to zero
+    # print('Nsteps', Nsteps)
     if np.sum(Nsteps<1)>0:
         # First try setting any parameter to 0 that doesn't have at least
         # one precision step, and recompute -log(L).

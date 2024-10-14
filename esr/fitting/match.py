@@ -24,8 +24,10 @@ rank = comm.Get_rank()
 size = comm.Get_size()
 
 
-def get_sigma_from_integral(p, Sigma, j, k, i, fcn_i, negloglike_all, nparams, max_fun_params, fop, number_points=10**3):
-        def fraction_likelihood(x, p, j, k, right):
+def get_sigma_from_integral(p, Sigma, i, fcn_i, negloglike_all, nparams, max_fun_params, fop, number_points=10**3):
+        # i is the index of the function in the list of all functions
+        # j is the index of the parameter in the list of all parameters
+        def fraction_likelihood(x, p, j, right):
             if right:
                 factor = 1
             else:
@@ -35,13 +37,8 @@ def get_sigma_from_integral(p, Sigma, j, k, i, fcn_i, negloglike_all, nparams, m
             #     return np.abs(fop([x]) - negloglike_all[i] - np.log(1e4))  
             # else:
             params = np.copy(p)
-            # print('param', params, flush=True)
             params[j] = params[j] + factor*10**(x)
-            # print('after', params, flush=True)
-            # print(params, flush=True)
-            # print('fop', fop(params))
-            # print(negloglike_all[i])
-            return np.abs(fop(params) - negloglike_all[i] - np.log(1e4))
+            return np.abs(fop(params) - negloglike_all[i] - np.log(1e3))
         
         def get_boundary(res_plus, res_minus, theta):
             if res_plus.success == False:
@@ -78,7 +75,7 @@ def get_sigma_from_integral(p, Sigma, j, k, i, fcn_i, negloglike_all, nparams, m
             return integral, a_range
         
         def test_success(res):
-            if res.success == False or res.fun > 0.01:
+            if res.success == False or res.fun > 0.1:
                 return False
             else:
                 return True
@@ -116,8 +113,8 @@ def get_sigma_from_integral(p, Sigma, j, k, i, fcn_i, negloglike_all, nparams, m
 
                 for initial_guess in initial_guesses:
                     # print('initial_guess', initial_guess, flush=True)
-                    res_minus = scipy.optimize.minimize(fraction_likelihood, initial_guess[j], args=(param, j, k, False), method='Nelder-Mead', tol=1e-8)
-                    res_plus = scipy.optimize.minimize(fraction_likelihood, initial_guess[j], args=(param, j, k, True), method = 'Nelder-Mead', tol=1e-8)
+                    res_minus = scipy.optimize.minimize(fraction_likelihood, initial_guess[j], args=(param, j, False), method='Nelder-Mead', tol=1e-8)
+                    res_plus = scipy.optimize.minimize(fraction_likelihood, initial_guess[j], args=(param, j, True), method = 'Nelder-Mead', tol=1e-8)
                     # print(res_minus, res_plus, flush=True)
 
                     if test_success(res_minus)== True or test_success(res_plus)==True:   
@@ -199,7 +196,8 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
     negloglike, params_meas, Nconv, Niter, times = test_all_Fisher.load_loglike(comp, likelihood, data_start, data_end, split=False)
     # print(Nconv, Niter, times, flush=True)
     max_param = params_meas.shape[1]
-    
+    # max_param =7
+
     all_inv_subs_proc = simplifier.load_subs(invsubs_file, max_param)[data_start:data_end]
     matches_proc = np.atleast_1d(np.loadtxt(match_file).astype(int))[data_start:data_end]
 
@@ -297,7 +295,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             
             # print('Integrating', fcn_i, flush=True)
             fop = get_fop(chi2_fcn, total_param=nparams)
-            Sigma = get_sigma_from_integral(p, Sigma, nparams, k, i, fcn_i, negloglike_all, nparams, max_param, get_fop(chi2_fcn, nparams), number_points=10**3)
+            Sigma = get_sigma_from_integral(p, Sigma, i, fcn_i, negloglike_all, nparams, max_param, get_fop(chi2_fcn, nparams), number_points=10**3)
             # print('Sigma', Sigma, flush=True)
             # print(p, flush=True)
             if np.isnan(Sigma).any():
@@ -322,6 +320,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         Nsteps[~m] = np.nan
         Nsteps = Nsteps[:nparams]
 
+
         # print(fcn_i, Delta, Nsteps)
         # except:
         #     print('Error with function:', fcn_i)
@@ -341,13 +340,14 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             try:            # It's possible that after putting params to 0 the likelihood is botched, in which case give it nan
                 fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
                 if k==1:
-                    eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+                    eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
                     fop = get_fop(chi2_fcn, total_param=nparams)
                     negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
+                    # print('negloglike_all[i]', negloglike_all[i])
                 else:
                     all_a = ' '.join([f'a{i}' for i in range(nparams)])
                     all_a = list(sympy.symbols(all_a, real=True))
-                    eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+                    eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
                     fop = get_fop(chi2_fcn, total_param=nparams)
                     negloglike_all[i] = fop(p)
 
@@ -355,12 +355,12 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 if try_integration:
                     fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
                     if k==1:
-                        eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+                        eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
                         negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
                     else:
                         all_a = ' '.join([f'a{i}' for i in range(nparams)])
                         all_a = list(sympy.symbols(all_a, real=True))
-                        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+                        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
                         fop = get_fop(chi2_fcn, total_param=nparams)
                         negloglike_all[i] = fop(p)
                 else:
@@ -394,14 +394,18 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 if np.isfinite(negloglike_all[i]):
                     k -= len(idx)
                     kept_mask[idx] = 0
-                elif not np.isfinite(negloglike_all[i]) and not np.isnan(negloglike_all[i]): # infinite nll
+                # elif not np.isfinite(negloglike_all[i]) and not np.isnan(negloglike_all[i]): # infinite nll
+                elif not np.isfinite(negloglike_all[i]):
                     p = ptrue
                     fish= fish[:nparams]
                     fish[Nsteps<1] = 12./(p[Nsteps<1]**2) # set uncertainty=parameter in this case
                     Delta[np.argwhere(Nsteps<1)] = abs(p[np.argwhere(Nsteps<1)])
                     # codelen[i] = -k/2.*math.log(3.) + np.sum( 0.5*np.log(fish) + np.log(abs(np.array(p))) )
                     p = np.append(p, np.zeros(max_param - len(p)))
-                    codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p))/Delta))
+
+                    Delta_codelen = Delta[:nparams]
+                    p_codelen = p[:nparams]
+                    codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p_codelen))/Delta_codelen))
                     negloglike_all[i] = negloglike_orig
                     try:        # If p was an array, we can make a list out of it
                         list_p = list(p)
@@ -422,7 +426,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             elif k==0:                  # If we have no parameters left then the parameter codelength is 0 so we can move on
                 continue
             
-            fish[:nparams] = fish[:nparams][kept_mask]      # Only consider these parameters in the codelen
+            fish = fish[:nparams][kept_mask]      # Only consider these parameters in the codelen
             # Delta = Delta[:nparams][kept_mask]
             p = p[kept_mask]
             
@@ -440,6 +444,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         # print('Delta', Delta)
         # print(np.sum(np.log(abs(np.array(p))/Delta)))
         codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p))/Delta))
+        # print('codelen', codelen[i])
         # except:
             # codelen[i] = np.nan
         
@@ -458,16 +463,14 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         
         assert len(params[i,:])==max_param
 
-        # print(i, codelen[i], negloglike_all[i], flush=True)
+        print(i, fcn_i, codelen[i], negloglike_all[i], flush=True)
         
 
     # print(codelen, flush=True)
-
-    
     
     fcn_list_proc = np.array(fcn_list_proc)
-    # print(fcn_list_proc[np.argwhere(codelen == np.inf)])
-    # print(fcn_list_proc[np.argwhere(codelen == - np.inf)])
+    print(fcn_list_proc[np.argwhere(codelen == np.inf)])
+    print(fcn_list_proc[np.argwhere(codelen == - np.inf)])
     # print(codelen)
     # out_arr = np.transpose(np.vstack([negloglike_all, codelen, index_arr] + [params[:,i] for i in range(max_param)]))
 

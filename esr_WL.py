@@ -1,14 +1,10 @@
 import numpy as np
-import os
 import sys
 from mpi4py import MPI
-import pickle
-import scipy
 from sympy import *
 import sympy
 import time
 import matplotlib.pyplot as plt
-import jax.numpy as jnp
 
 import esr.fitting.test_all
 import esr.fitting.test_all_Fisher
@@ -26,6 +22,7 @@ import esr.fitting.plot_Hull
 import esr.fitting.compare_methods
 from esr.esd import ExcessSurfaceDensity
 import esr.fitting.combine_comp
+import esr.fitting.combine_galaxies
 
 
 comm = MPI.COMM_WORLD
@@ -33,11 +30,11 @@ rank = comm.Get_rank()
 size = comm.Get_size()
 
 
-def plot_single(fcn, measured, likelihood, max_param=4, tmax=5, try_integration=False, xscale='linear', yscale='linear'):
+def plot_single(fcn, measured, likelihood, ax1, max_param=4, tmax=5, try_integration=False, xscale='linear', yscale='linear'):
         fcn_i = fcn.replace('\'', '')
 
-        fig  = plt.figure(figsize=(7,5))
-        ax1  = fig.add_axes([0.10,0.10,0.70,0.85])
+        # fig  = plt.figure(figsize=(7,5))
+        # ax1  = fig.add_axes([0.10,0.10,0.70,0.85])
 
         
         k = simplifier.count_params([fcn_i], max_param)[0]
@@ -57,66 +54,30 @@ def plot_single(fcn, measured, likelihood, max_param=4, tmax=5, try_integration=
 
     
         # esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
-        x_array = np.linspace(likelihood.xvar.min(), likelihood.xvar.max(), 1000)
+        x_array = np.linspace(0, likelihood.xvar.max(), 1000)
         esd = ExcessSurfaceDensity.calculate(x_array, eq_numpy, params=measured)
-
-
-        # measured = [-10**(6), 1]
-        # esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
-        # print(esd)
-
-        # measured = [1, 1]
-        # esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
-        # print(esd)
-
-
-        # measured = [2, 1]
-        # esd = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=measured)
-        # print(esd)
-        # sys.exit(0)
+        y_pred2 = eq_numpy(x_array, *measured)
 
         # Plot the ESD on the first figure
-        ax1.plot(x_array, esd)
+        ax1.plot(x_array, esd, label=fcn_i)
         ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.')
         ax1.set_xscale(xscale)
         ax1.set_yscale(yscale)
-        plt.show()
-
-        fig2 = plt.figure(figsize=(7,5))
-        ax2  = fig2.add_axes([0.10,0.10,0.70,0.85])
-        ax2.plot(likelihood.xvar, ypred)
-        ax2.set_xscale(xscale)
-        ax2.set_yscale(yscale)
-        plt.show()
-
-
-        # ax1.plot(likelihood.xvar, esd)
-        
-
-        # ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.')
-
-        # # ax1.set_xlabel(r'$r_{proj} (Mpc)$')
-        # # ax1.set_ylabel(r'$ESD (10^{12} M_{sun}/Mpc^2)$')
-        # # ax1.set_xscale(xscale)
-        # # ax1.set_yscale(yscale)
-        # # if xscale != 'log':
-        # #     ax1.set_xlim(0, None)
-        # # ax1.set_ylim(likelihood.yvar.min() * 0.9, likelihood.yvar.max() * 1.1)
-
-        # # fig.tight_layout()
-        # # fig.clf()
         # plt.show()
 
-        # axfig2.plot(likelihood.xvar, ypred)
+        #Plot density
+        # fig2 = plt.figure(figsize=(7,5))
+        # ax2  = fig2.add_axes([0.10,0.10,0.70,0.85])
+
+        # if np.isscalar(y_pred2):
+        #     ax2.plot(x_array, [y_pred2]*len(x_array))
+        # else:
+        #     ax2.plot(x_array, y_pred2)
+        # ax2.set_xscale(xscale)
+        # ax2.set_yscale(yscale)
         # plt.show()
-    # plt.close(fig)
 
-    # fig2.tight_layout()
-    # fig2.savefig(likelihood.fig_dir + '/density_plot_%i.png'%comp, dpi=300)
-    # fig2.clf()
-    # plt.close(fig2)
-
-def run_fit_single(data_file, run_name, fn, log_opt, method):
+def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
         basis_functions = [["x", "a"],  # type0
                 ["inv", "abs", "log", "exp"],  # type1
                 ["+", "*", "-", "/", "pow"]]  # type2
@@ -134,8 +95,24 @@ def run_fit_single(data_file, run_name, fn, log_opt, method):
                                                         verbose=True,
                                                         log_opt=log_opt,
                                                         return_params=True)
-        
-        plot_single(fn, params, likelihood)
+
+        plot_single(fn, params, likelihood, ax)
+
+        #calculate the mass and concentration
+        fcn_i, eq= likelihood.run_sympify(fn)
+        k = simplifier.count_params([fcn_i], 4)[0]
+        if k == 0:
+            eq_numpy = sympy.lambdify([x], eq, modules=["numpy"])
+        elif k > 1:
+            all_a = ' '.join([f'a{i}' for i in range(k)])
+            all_a = list(sympy.symbols(all_a, real=True))
+            eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+        else:
+            eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+
+        M200 = likelihood.M_delta(200, eq_numpy, params)
+        print('M200:', M200)
+
         return chi2, params, DL
 
 
@@ -149,17 +126,12 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
     #Likelihood
     likelihood = WLLikelihood(data_file, run_name + log, data_dir=None, fn_set = 'core_maths')   
     
-    # esr.fitting.compare_methods.create_comparison_table(comp, likelihood)
-    # esr.fitting.plot_Hull.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='linear', yscale='linear')
-    # esr.fitting.combine_comp.main(likelihood, tmax=5, try_integration=try_integration, xscale='log', yscale='log')
-
-    
     # run esr
     # esr.fitting.test_all.main(comp, likelihood, try_integration=try_integration, log_opt=log_opt, method=method)
     # esr.fitting.test_all_Fisher.main(comp, likelihood, tmax=5, try_integration=try_integration)
-    # esr.fitting.match.main(comp, likelihood, tmax=5, try_integration=try_integration)
+    esr.fitting.match.main(comp, likelihood, tmax=5, try_integration=try_integration)
     # esr.fitting.combine_DL.main(comp, likelihood)
-    # esr.fitting.plot.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='log', yscale='log')
+    #esr.fitting.plot.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='log', yscale='log')
 
      
     
@@ -171,17 +143,17 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
 # run code for a single set of data
 #------------------------------------------------------------
 
-# comp = 4
+# comp = 6
 # try_integration = False
 # method = "BFGS"
 # log_opt = False
 # # data_file = 'esr/dark_matter_data2.txt'
-# name = 6
-# data_file = 'XXL/' + str(name) + '.pickle'
+# name = 111
+# data_file = 'XXL/' + str(name) + '.txt'
 # run_name = 'WL_' + str(name)
 
 # if rank == 0:
-#     print('method:', method, ', log_opt:', log_opt, flush=True)
+#     print('method:', method, ', log_opt:', log_opt, "cluster:", name, flush=True)
 
 # start = time.time()
 # fit_galaxy(data_file, run_name, comp, try_integration=try_integration, method=method, log_opt=log_opt)
@@ -197,39 +169,84 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
 
 method = "Nelder-Mead"
 log_opt = False
-data_file = 'XXL/6.pickle'
-run_name = 'WL'
+name = 76
+data_file = 'XXL/' + str(name) + '.txt'
+run_name = 'WL_' + str(name)
 
-# fn = 'a0/(x*(x + 1)^2)' #NFW
+# dtafile all clusters
+# data_file = 'XXL/combined_data.txt'
+# run_name = 'WL'
 
-# fn = 'pow(Abs(a0),(pow(x,x)))'
-# fn = 'pow(Abs(a0),(-1/x))'
-# fn = '1/(x + pow(Abs(a0),x))'
-# fn = ' pow(Abs(a0),(pow(Abs(a1),(1/x))))'
-# fn = '1/(a0 + pow (Abs (a1) ,x) )'
-# fn = 'a0/x**2'
-# fn = 'x + 1/(a0 + x)'
-# fn = 'pow(0,(1/a0))'
-# fn = 'pow(Abs(a0),(-1/x))'
-# fn = 'pow(Abs(a0 - x),-1.3600380)'
-# fn = 'pow(Abs(a0),(1/(2*x)))'
-# fn = '1/(x + pow(Abs(a0),x))'
-# fn = '1/(x - Abs(a0))'
-# fn = 'pow(Abs(a0),(1/x))/x'
-# fn = 'x/pow(Abs(a0),x)'
-# fn = 'a0/(a1 - x) + a2'
-# fn = ' + a0/x**7'
-fn = 'a0 + a1*x'
+fn1 =  'pow(Abs(a0*x - pow(x,x)),a1)'
+fn2 =  'a1/(-x + pow(Abs(a0),x))'
+fn3 = '(a0 + a1/x)/x'
+fn4 = 'a0*(x + 1/x)/x'
+fn5 = 'a0*(a1*x + 1/x)'
+
+fn_list = [fn1, fn2, fn3, fn4, fn5]
+
+fn_list = ['1/(x*pow(x,(pow(Abs(a0),(-x)))))']
+
+# fn = 'a0/(x*(x + a1)^2)' #NFW
+# fn = '[[[a0/x**3'
+# fn = 'a1 + a2*x + a0*x**2'
+# fn = 'pow(x,(a0*x))'
+
+# fn = 'a0*pow(x, a1)'
+# fn = '1/(a0 - x)'
+# fn = 'pow(0,a0)'
+# fn = '1/x + a0'
 
 if rank == 0:
     print('method:', method, ', log_opt:', log_opt, flush=True)
 
-start = time.time()
-chi2, params, algo = run_fit_single(data_file, run_name, fn, log_opt, method)
-print(chi2, params)
-end = time.time()
+# Create a figure and axis for the plot
+fig, ax = plt.subplots(figsize=(7, 5))
+
+for fn in fn_list:
+    start = time.time()
+    chi2, params, algo = run_fit_single(data_file, run_name, fn, log_opt, method, ax)
+    print(chi2, params)
+    end = time.time()
+plt.legend()
+plt.show()
 
 
 
 if rank == 0:
     print('Total time taken:', end - start, flush=True)
+    
+#------------------------------------------------------------
+#run pareto plot
+#------------------------------------------------------------
+    
+# from esr.plotting.plot import pareto_plot
+
+# name = 27
+# dirname = 'esr/fitting/output_glamdring/output/output_WL_' + str(name)
+# savefile = 'pareto_' + str(name) + '.png'
+# # pareto_plot(dirname, savefile)
+
+
+#------------------------------------------------------------
+# combine all comp for same cluster
+#------------------------------------------------------------
+
+# name = 27
+# dirname = 'esr/fitting/output_glamdring/output/output_WL_' + str(name)
+# savename = 'combine_all_comp_' + str(name) + '.dat'
+# esr.fitting.combine_comp.main(dirname, savename)
+
+#------------------------------------------------------------
+# combine all comp for all clusters
+#------------------------------------------------------------
+
+# dirname = 'esr/fitting/output_glamdring/output/'
+# fcn_dir = 'esr//function_library/core_maths/'
+# esr.fitting.combine_galaxies.main(dirname, fcn_dir)
+
+
+#------------------------------------------------------------
+# esr.fitting.compare_methods.create_comparison_table(comp, likelihood)
+# esr.fitting.plot_Hull.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='linear', yscale='linear')
+# esr.fitting.combine_galaxies.main(comp, likelihood)

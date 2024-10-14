@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 
 from esr.fitting.sympy_symbols import *
 import esr.generation.simplifier as simplifier
+from esr.esd import ExcessSurfaceDensity
 #import nlopt
 
 
@@ -198,16 +199,16 @@ def optimise_with_base_hoping(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_i
         chi2_fcn = likelihood.get_wrapped_like(loss_template)
         chi2_i =  chi2_fcn([], xvar, yvar, yerr, None)
 
-        return chi2_i[0], params, 0, 0
+        return chi2_i[0], params, 0, 0, False
 
     flag_three = False
 
     if nparam > 1:
         all_a = ' '.join([f'a{i}' for i in range(nparam)])
         all_a = list(sympy.symbols(all_a, real=True))
-        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
     else:
-        eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+        eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
 
 
     bad_fun = True
@@ -253,7 +254,59 @@ def optimise_with_base_hoping(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_i
     # print("Global minimum: x = ", res.x, ", f(x) = ", res.fun)
 
     return res.fun, params, 0, 0, True
-    
+
+def local_optimisation(inpt, xvar, yvar, yerr, signs, global_index):
+
+    Niter = 1
+
+    global_params = inpt[global_params]
+    local_params = inpt[2:] #the rest
+    pmin = -10
+    pmax = 10
+
+    #divide the data for the fifferent clustes
+    points_per_cluster = 9
+    nclusters = len(xvar)//points_per_cluster
+    xvar = np.array_split(xvar, nclusters)
+    yvar = np.array_split(yvar, nclusters)
+    yerr = np.array_split(yerr, nclusters)
+
+    total_loss = 0
+    local_params_per_cluster = []
+
+    for i in range(nclusters):
+        xvar_i = xvar[i]
+        yvar_i = yvar[i]
+        yerr_i = yerr[i]
+
+        nlocal = len(inpt[global_index:])  # Separate out local params from global
+        inpt_local = initial_guess(nlocal, pmin, pmax, lhs=True)
+
+        # Perform local optimization (global params fixed)
+        res = minimize(ngl_nested, inpt_local, args=(xvar_i, yvar_i, yerr_i, signs, global_params),
+                        method='BFGS', options=dict(gtol=1e-3))
+        
+        local_params_per_cluster.append(res.x)
+        total_loss += res.fun
+
+    return local_params_per_cluster, total_loss
+
+def global_local_optimise(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=False, log_opt=False, max_param=4, Niter_params=[40,60], Nconv_params=[-5,20], test_success=False, ignore_previous_eqns=True, method='BFGS', Nconv=400, Niter=400):
+    xvar, yvar, yerr= likelihood.xvar, likelihood.yvar, likelihood.yerr
+    Niter = 10
+
+    nparam = 2
+    global_index = 1
+
+    for j in range(Niter):
+
+        inpt = initial_guess(nparam, pmin, pmax, lhs = True)
+        signs = None
+        flag_three = True
+        method = 'Nelder-Mead'
+        res = minimize_scipy(local_optimisation, inpt, jac=True,  args=(xvar, yvar, yerr, signs, global_index), options=dict(gtol = 1e-3), method=method)
+
+#     #take from these optimisations the best one
     
     
 def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=False, log_opt=False, max_param=4, Niter_params=[40,60], Nconv_params=[-5,20], test_success=False, ignore_previous_eqns=True, method='BFGS', Nconv=400, Niter=400):
@@ -314,11 +367,13 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
 
     if ("a0" in fcn_i)==False:
         eq_numpy = sympy.lambdify(x, eq, modules=["jax"])
+
         loss_template = likelihood.get_loss(eq_numpy)
         chi2_fcn = likelihood.get_wrapped_like(loss_template)
         chi2_i =  chi2_fcn([], xvar, yvar, yerr, None)
 
         return chi2_i[0], params, 0, 0, False
+
 
     flag_three = False
 
@@ -331,16 +386,19 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
     if nparam > 1:
         all_a = ' '.join([f'a{i}' for i in range(nparam)])
         all_a = list(sympy.symbols(all_a, real=True))
-        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
     else:
-        eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+        eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
 
 
     bad_fun = True
     for p in itertools.product([1, -1], repeat=nparam):
-        if not (np.sum(np.isnan(eq_numpy(xvar,*p)))>0):
-            bad_fun = False
-            break
+        try:
+            if not (np.sum(np.isnan(eq_numpy(xvar,*p)))>0):
+                bad_fun = False
+                break
+        except: #probably not an issue cause functions 
+            bad_fun = True
     
     if bad_fun:
         # Don't bother trying to optimise bc this fcn is clearly really bad
@@ -372,30 +430,31 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
         
         #Two params
         #GRID
-        # p1_range = np.linspace(-6, -4, 100)
-        # p0_range = np.linspace(-8, 10, 100)
+        p1_range = np.linspace(-10, 0, 100)
+        p0_range = np.linspace(0, 50, 100)
 
-        # X, Y = np.meshgrid(p0_range,p1_range)
+        X, Y = np.meshgrid(p0_range,p1_range)
 
-        # likelihood_grid = np.zeros((len(p0_range), len(p1_range)))
-        # for i, p0 in enumerate(p0_range):
-        #     for j, p1 in enumerate(p1_range):
-        #         # p = [p0, p1, 70.72968204, 3.91752186, 0.61884448, 1.10634005]
-        #         # p = [p0, p1, likelihood.inc_true, likelihood.distance_true, likelihood.upsilon_disk_true, likelihood.upsilon_gas_true]
-        #         p = [p0, p1]
-        #         negloglike = chi2_fcn_mcmc(p, likelihood.xvar, likelihood.yvar, likelihood.yerr, signs=[-1, -1])
-        #         likelihood_grid[j, i] = np.log10(negloglike)
+        likelihood_grid = np.zeros((len(p0_range), len(p1_range)))
+        for i, p0 in enumerate(p0_range):
+            for j, p1 in enumerate(p1_range):
+                # p = [p0, p1, 70.72968204, 3.91752186, 0.61884448, 1.10634005]
+                # p = [p0, p1, likelihood.inc_true, likelihood.distance_true, likelihood.upsilon_disk_true, likelihood.upsilon_gas_true]
+                p = [p0, p1]
+                negloglike = chi2_fcn_mcmc(p, likelihood.xvar, likelihood.yvar, likelihood.yerr, signs=None)
+                likelihood_grid[j, i] = np.log10(negloglike)
+                # likelihood_grid[j, i] = negloglike
 
-        # # Plot the heatmap
-        # plt.figure(figsize=(8, 6))
-        # plt.contourf(X, Y, likelihood_grid, levels=50)
-        # plt.colorbar(label='Log(Negative Log-Likelihood)')
-        # plt.xlabel('p0')
-        # plt.ylabel('p1')
-        # plt.title('Likelihood Grid')
-        # plt.grid(False)
-        # plt.show()
-        # sys.exit(0)
+        # Plot the heatmap
+        plt.figure(figsize=(8, 6))
+        plt.contourf(X, Y, likelihood_grid, levels=50)
+        plt.colorbar(label='Log(Negative Log-Likelihood)')
+        plt.xlabel('p0')
+        plt.ylabel('p1')
+        plt.title('Likelihood Grid')
+        plt.grid(False)
+        plt.show()
+        sys.exit(0)
 
         #Likelihood slice
         # p1 = -5
@@ -419,21 +478,37 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
 
 
         #One param
-        p0_range = np.linspace(0, 5, 1000)
-        negloglikes = []
-        esds = []
-        for p0 in p0_range:
-            p = [p0]
-            p_10 = [10**p0]
-            esd = likelihood.get_pred(p_10, likelihood.xvar, eq_numpy)
-            negloglike = chi2_fcn_mcmc(p, likelihood.xvar, likelihood.yvar, likelihood.yerr, signs=[1])
-            negloglike = np.log10(negloglike)
-            negloglikes.append(negloglike)
-            esds.append(np.sum(esd))
-        plt.plot(p0_range, negloglikes)
-        # plt.plot(p0_range, esds)
-        plt.show()
-        sys.exit(0)
+        # p0_range = np.linspace(0, 5, 1000)
+        # negloglikes = []
+        # esds = []
+        # for p0 in p0_range:
+        #     p = [p0]
+        #     p_10 = [10**p0]
+        #     esd = likelihood.get_pred(p_10, likelihood.xvar, eq_numpy)
+        #     negloglike = chi2_fcn_mcmc(p, likelihood.xvar, likelihood.yvar, likelihood.yerr, signs=[1])
+        #     negloglike = np.log10(negloglike)
+        #     negloglikes.append(negloglike)
+        #     esds.append(np.sum(esd))
+        # plt.plot(p0_range, negloglikes)
+        # # plt.plot(p0_range, esds)
+        # plt.show()
+        # sys.exit(0)
+
+
+        # esds = []
+        # a = [131.39093196]
+        # for num_points in [120, 240, 480, 960, 1000, 1920, 3840]:
+
+        #     esd = ExcessSurfaceDensity.calculate(xvar, eq_numpy, params=a, num_points=num_points)
+        #     esd = np.sum(esd)
+        #     esds.append(esd)
+
+
+        # plt.plot([120, 240, 480, 960, 1000, 1920, 3840], esds)
+        # plt.xlabel('Number of points')
+        # plt.ylabel('Sum(ESD)')
+        # plt.show()
+        # sys.exit()
 
 
 
@@ -472,7 +547,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
             inf_count += 1
 
         # Failure if first 50 all give inf
-        if inf_count==30 and np.isinf(chi2_min):
+        if inf_count==50 and np.isinf(chi2_min):
             break
 
         # Reset count if log-like improves by 2
@@ -531,6 +606,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
     #         params[:] = 0.
 
     # except Exception as e:
+    #     print('Exception:', e, flush=True)
     #     return np.nan, params, 0, 0
 
     # maybe check success myself
@@ -586,7 +662,7 @@ def main(comp, likelihood, tmax=120, pmin=0, pmax=3, print_frequency=50, try_int
 
     fcn_list_proc, _, _ = get_functions(comp, likelihood)
 
-    
+    # ignore_previous_eqns = False
     if rank==0 and ignore_previous_eqns:
         previous_unifn_list = []
         if comp>1: 
@@ -705,7 +781,8 @@ def main(comp, likelihood, tmax=120, pmin=0, pmax=3, print_frequency=50, try_int
                                                 ignore_previous_eqns=ignore_previous_eqns)
                 else:
                     raise NameError
-        except:
+        except Exception as e:
+            print('overall exception:', e, flush=True) 
             chi2[i] = np.nan
             params[i,:] = 0.
 

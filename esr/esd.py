@@ -1,10 +1,11 @@
-import numpy as np
+# import numpy as np
 from dataclasses import dataclass
 import jax.numpy as np
 import scipy.integrate as integrate
 import sys
 import jax
 import matplotlib.pyplot as plt
+import numpy
 
 
 MIN_INTEGRATION_RADIUS = 1e-6
@@ -157,13 +158,21 @@ class ExcessSurfaceDensity:
     params: tuple  # Store additional parameters
 
     def check_density(self, rhos):
-        """Check if any density values are below the threshold."""
-        jax.debug.print('rhos {x}', x = np.any(rhos < -1e-8))
-        return np.any(rhos < -1e-8)
+        # Check if any densities are below the threshold (-1e-8)
+        below_threshold = np.any(rhos < -1e-8)
+        
+        # Check if any densities are infinite
+        # has_infinite_values = np.any(np.isinf(rhos))
+        
 
+        # return np.logical_or(below_threshold, has_infinite_values)
+        return below_threshold
+    
     def _esd_first_term_integrand_func(self, xs):
         """First term integrand function for ESD calculation."""
         rhos = self.density_func(xs, *self.params)
+        # jax.debug.print('rho {x}', x = rhos)
+        # jax.debug.print('xs {x}', x = xs)
         radii_ = self.radii
         postfactor = xs**2 / atleast_kd(self.radii, xs.ndim, append_dims=False)**2
         postfactor = atleast_kd(postfactor, rhos.ndim)
@@ -174,7 +183,7 @@ class ExcessSurfaceDensity:
     def _esd_second_term_integrand_func(self, thetas):
         """Second term integrand function for ESD calculation."""
         thetas_ = atleast_kd(thetas, self.radii.ndim + 1)
-        density_arg = self.radii[None, ...] / np.cos(thetas_)
+        density_arg = self.radii[None, ...] / np.abs(np.cos(thetas_))
         rhos = self.density_func(density_arg, *self.params)
         radii = atleast_kd(self.radii[None, ...], rhos.ndim)
         if self.radial_axis_to_broadcast is not None:
@@ -200,6 +209,18 @@ class ExcessSurfaceDensity:
 
             first_term = trapz_(first_term_integrand, axis=0, dx=dxs)
             second_term = trapz_(second_term_integrand, axis=0, dx=dthetas)
+
+            # num_error = np.sum((first_term - second_term)/first_term)
+            # MAX_ERROR_TOLERANCE = 1e-3
+
+            # def do_nothng():
+            #     jax.debug.print('this one is fine')
+            #     pass
+            # def handle_large_error():
+            #     jax.debug.print('WARNING: ESD calculation has a large numerical error {x}', x = self.params)
+
+            # jax.lax.cond(num_error < MAX_ERROR_TOLERANCE, handle_large_error, do_nothng)
+            # jax.debug.print('second {x}', x = first_term )
             return first_term - second_term
 
         def handle_invalid_density():
@@ -212,83 +233,8 @@ class ExcessSurfaceDensity:
         )
         return esd_result
 
-
-
-# @dataclass
-# class ExcessSurfaceDensity:
-#     radii: np.ndarray
-#     density_func: object
-#     num_points: int
-#     radial_axis_to_broadcast: object
-#     density_axis: object
-#     params: tuple  # Add this line to store additional parameters
-
-#     def _esd_first_term_integrand_func(self, xs):
-#         # jax.debug.print('xs {x}', x = (xs).size)
-#         rhos = self.density_func(xs, *self.params)  # Pass the parameters to the density function
-#         # rhos = self.check_density(rhos)
-#         # jax.debug.print('first term {x}', x = rhos)
-#         radii_ = self.radii
-#         postfactor = xs**2 / atleast_kd(self.radii, xs.ndim, append_dims=False)**2
-#         postfactor = atleast_kd(postfactor, rhos.ndim)
-#         if self.radial_axis_to_broadcast is not None:
-#             postfactor = np.moveaxis(postfactor, self.radial_axis_to_broadcast + 1, self.density_axis)
-#         return 4 * rhos * postfactor, rhos
-
-#     def _esd_second_term_integrand_func(self, thetas):
-#         thetas_ = atleast_kd(thetas, self.radii.ndim + 1)
-#         density_arg = self.radii[None, ...] / np.cos(thetas_)
-#         # jax.debug.print('density_arg {x}', x = len(density_arg))
-#         rhos = self.density_func(density_arg, *self.params)  # Pass the parameters to the density function
-#         # rhos = self.check_density(rhos)
-#         radii = atleast_kd(self.radii[None, ...], rhos.ndim)
-#         if self.radial_axis_to_broadcast is not None:
-#             radii = np.moveaxis(radii, self.radial_axis_to_broadcast + 1, self.density_axis)
-#         thetas__ = atleast_kd(thetas_, rhos.ndim)
-#         return 4 * radii * rhos / (4 * np.sin(thetas__) + 3 - np.cos(2 * thetas__)), rhos
-
-#     def esd(self):
-#         esd = 0
-
-#         xs = np.linspace(MIN_INTEGRATION_RADIUS, self.radii, self.num_points)
-#         first_term_integrand, rhos = self._esd_first_term_integrand_func(xs)
-#         dxs = atleast_kd(np.gradient(xs, axis=0), first_term_integrand.ndim)
-#         if self.radial_axis_to_broadcast is not None:
-#             dxs = np.moveaxis(dxs, self.radial_axis_to_broadcast + 1, self.density_axis)
-    
-#         thetas = np.linspace(0, np.pi / 2, self.num_points)
-#         dthetas = np.gradient(thetas, axis=0)
-#         second_term_integrand, rhos_second = self._esd_second_term_integrand_func(thetas)
-        
-#         first_term = trapz_(first_term_integrand, axis=0, dx=dxs)
-#         second_term = trapz_(second_term_integrand, axis=0, dx=dthetas)
-#         # jax.debug.print('first term {x}', x = first_term)
-#         # jax.debug.print('second term {x}', x = second_term)
-#         # print('second term',second_term)  
-#         # print('first term', first_term)  
-#         # sys.exit()
-
-#         return first_term - second_term
-
     @classmethod
     def calculate(cls, radii, density_func, num_points=120, radial_axis_to_broadcast=None, density_axis=None, params=()):
-        # esds = []
-        # for num_points in [120, 240, 480, 960]:
-        #     esd = cls(
-        #         radii=radii,
-        #         density_func=density_func,
-        #         num_points=num_points,
-        #         radial_axis_to_broadcast=radial_axis_to_broadcast,
-        #         density_axis=density_axis,
-        #         params=params
-        #     ).esd()
-
-        #     esd = np.sum(esd)
-        #     esds.append(esd)
-
-        # plt.plot(esds)
-        # plt.show()
-        # sys.exit()
 
         return cls(
             radii=radii,
