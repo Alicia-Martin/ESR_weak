@@ -12,6 +12,11 @@ from esr.fitting.sympy_symbols import *
 from esr.esd import ExcessSurfaceDensity
 from esr.generation import simplifier
 from esr.fitting.WL_likelihood import WLLikelihood
+import sympy
+import pickle
+import pandas as pd
+
+from itertools import combinations
 
 warnings.filterwarnings("ignore")
 
@@ -354,24 +359,113 @@ def plot(name, fcn_list, params, DL, dirname, xscale='log', yscale='log', NFW=Tr
 # def plot_params():
 
 
+def get_functions_global_params(fcn_list_sorted, DL_sorted, p0, p1, p2, p3, u1, u2, u3, u4, comp,  BIC = False):
+    Delta_DL_local = DL_sorted - DL_sorted[0]
+
+    params = np.array([p0, p1, p2, p3]).T
+    uncertainties = np.array([u1, u2, u3, u4]).T 
+
+    print('shape', np.array(params).shape)
+
+    #params shape: (number of clusters, number of functions, 4 params)
+    #uncertainties shape: (number of clusters, number of functions, 4 params)
+
+    def calculate_Delta(params, uncertainties, BIC = False, max_combination_size=4):
+        if BIC:
+            n_global = 1
+            n_clusters = 12
+            n_points = n_clusters*9
+            #BIC criteria
+            Delta_nparams = n_global*n_clusters - n_global
+            Delta_BIC = Delta_nparams*np.log(n_points) + 2*Delta_DL_local
+            
+            return Delta_BIC, 0
+
+        else:
+            Delta_MDL_values = []
+            param_indices_values = []
+            N = len(params) #number of clusters
+            print('N', N)
+            for num_params in range(1, min(max_combination_size, params.shape[2]) + 1):
+                for param_indices in combinations(range(params.shape[2]), num_params):
+                    global_params = params[:, :, param_indices]
+                    global_uncertainties = uncertainties[:, :, param_indices]
+
+                    Fisher_diag = 12./global_uncertainties**2
+
+                    fisher_term = 1/2*np.log(Fisher_diag) + np.log(np.abs(global_params))
+                    fisher_term[global_params == 0] = 0
+                    fisher_term[global_uncertainties == 0] = 0
+                    sum_over_global_params = np.sum(fisher_term, axis=2)
+                    # print('Delta_MDL', sum_over_global_params)
+                    # sys.exit()
+
+                    #sum over all galaxies
+                    # print('sum_over_global_params', np.sum(sum_over_global_params, axis=0))
+                    Delta_MDL = np.sum(sum_over_global_params, axis=0) + len(param_indices)*(np.log(2) - N/2*np.log(3))
+                    # print(len(param_indices)*(np.log(2) - N/2*np.log(3)))
+                    # print(N)
+                    # print('Delta_MDL', Delta_MDL)
+                    # sys.exit()
+
+                    Delta_MDL_values.append(Delta_MDL)
+                    param_indices_values.append(param_indices)
+            
+            return Delta_MDL_values, param_indices_values
+            
+
+    max_Delta_global, indices = calculate_Delta(params, uncertainties) #index_combination, #number of fucntions
+
+    func_to_save = []
+    indices_to_save = []
+    comps_to_save = []
+    diff_to_sort = []
+    num = 0
+    print(len(fcn_list_sorted))
+    for i in range(len(fcn_list_sorted)):
+        for index_combination in range(len(max_Delta_global)):
+            # print(num, fcn_list_sorted[i], max_Delta_global[index_combination][i], Delta_DL_local[i])
+            delta_difference = max_Delta_global[index_combination][i] - Delta_DL_local[i]
+
+            if delta_difference > 0:
+            #if max_Delta_global[index_combination][i] > Delta_DL_local[i]:
+                num_params = simplifier.count_params([fcn_list_sorted[i]], 4)[0]
+                indices_to_print = indices[index_combination]
+                #maybe take out funcs with divergences
+                if np.any(indices_to_print > (num_params - 1)):
+                    continue
+                else:
+                    num += 1
+                    print(num, fcn_list_sorted[i], indices_to_print, max_Delta_global[index_combination][i]- Delta_DL_local[i])
+
+                # return True
+                    
+                    func_to_save.append(fcn_list_sorted[i])
+                    indices_to_save.append(indices_to_print)
+                    comps_to_save.append(comp[i])
+
+                    diff_to_sort.append((delta_difference, fcn_list_sorted[i], indices_to_print, comp[i]))
+        # if Delta[i] > Delta_DL:
+        #     print(fcn_list_sorted[i], Delta[i], DL_sorted[i], params[i], uncertainties[i])
+        #     return True
+                    
+        # Sort the list by the difference in descending order
+        diff_to_sort_sorted = sorted(diff_to_sort, key=lambda x: x[0], reverse=True)
+
+        # Save the sorted functions
+        with open('esr/fitting/output_decreasing/output/combining_clusters/glolbal_local_funcs.txt', 'w') as f:
+            for delta_diff, func, indices, complexity in diff_to_sort_sorted:
+                f.write(f'{func}|{str(indices)}|{complexity}\n')
+                    
+        # #save funcs and indices
+        # with open('esr/fitting/output_decreasing/output/combining_clusters/glolbal_local_funcs.txt', 'w') as f:
+        #     for i in range(len(func_to_save)):
+        #         # f.write(func_to_save[i] + ', ' + str(indices_to_save[i]) + ', ' + str(comps_to_save[i]) + '\n')
+        #         f.write(f'{func_to_save[i]}|{str(indices_to_save[i])}|{comps_to_save[i]}\n')
 
 def main(name, dirname, plot= False):
-    """Plot best 50 functions at given complexity against data and save plot to file
-
-    Args:
-        :comp (int): complexity of functions to consider
-        :likelihood (fitting.likelihood object): object containing data, functions to convert SR expressions to variable of data and output path
-        :tmax (float, default=5.): maximum time in seconds to run any one part of simplification procedure for a given function
-        :try_integration (bool, default=False): when likelihood requires integral, whether to try to analytically integrate (True) or just numerically integrate (False)
-        :xscale (str, default='linear'): Scaling for x-axis
-        :yscale (str, default='linear'): Scaling for y-axis
-
-    Returns:
-        None
-
-    """
-
     savename = 'combine_all_comp_' + str(name) + '.txt'
+    savename_dat = 'combine_all_comp_' + str(name) + '.dat'
 
     if rank != 0:
         return
@@ -381,19 +475,53 @@ def main(name, dirname, plot= False):
     all_f.sort()
     # print(all_f)
     all_comp = [int(f[len('final_'):-len('.dat')]) for f in all_f]
+
+    print(dirname)
+    params_f = os.listdir(dirname)
+    params_f = [f for f in params_f if f.endswith('.pkl')]
+    params_f.sort()
+    print(params_f)
+
     
     data = []
+    p0, p1, p2, p3 = np.array([]), np.array([]), np.array([]), np.array([])
+    d0, d1, d2, d3 = np.array([]), np.array([]), np.array([]), np.array([])
     for i, fname in enumerate(all_f):
         print(i, fname)
 
         with open(dirname + '/' +  fname, "r") as f:
             reader = csv.reader(f, delimiter=';')
             data_comp = [row for row in reader]
+            # print(len(data_comp))
+            # if i == 4:
+            #     print(data_comp[4])
             # print(data_comp)
             for row in data_comp:
                 row.append(all_comp[i])
             data.extend(data_comp)
+
+
+        with open(dirname + '/' +  params_f[i], "rb") as f:
+            params = pickle.load(f)
+            # if i == 4:
+            #     print(params['a0'][4])
+            p0 = np.concatenate((p0, params['a0'])) if p0.size else params['a0']
+            p1 = np.concatenate((p1, params['a1'])) if p1.size else params['a1']
+            p2 = np.concatenate((p2, params['a2'])) if p2.size else params['a2']
+            p3 = np.concatenate((p3, params['a3'])) if p3.size else params['a3']
+
+            d0 = np.concatenate((d0, params['d0'])) if d0.size else params['d0']
+            d1 = np.concatenate((d1, params['d1'])) if d1.size else params['d1']
+            d2 = np.concatenate((d2, params['d2'])) if d2.size else params['d2']
+            d3 = np.concatenate((d3, params['d3'])) if d3.size else params['d3']
+
+            # uncertainties = pickle.load(f)
+
         # print(data)
+    # print('p0', len(p0))
+    # print('p0', p0[16,:])
+    # # print('d0', d0)
+    # sys.exit()
 
     if not data:
         print("No functions with finite DL found, so will not make figure")
@@ -405,10 +533,11 @@ def main(name, dirname, plot= False):
 
     fcn_list = [d[1] for d in data]
     DL = np.array([float(d[2]) for d in data])
-    Prel = np.array([float(d[3]) for d in data])
+    Prel = np.array([float(d[2]) for d in data])
     negloglike = np.array([float(d[4]) for d in data])
     codelen = np.array([float(d[5]) for d in data])
     ayfeyn = np.array([float(d[6]) for d in data])
+    divergence = np.array([d[-2] for d in data])
     comp = np.array([int(d[-1]) for d in data])
 
     params = np.array([d[-max_param:(4 - max_param)] for d in data], dtype=float)
@@ -420,6 +549,8 @@ def main(name, dirname, plot= False):
     # Get indices that would sort DL in ascending order
     sorted_indices = np.argsort(DL)
 
+    # print(len(DL))
+
     # Apply the sorted indices to all arrays
     fcn_list_sorted = [fcn_list[i] for i in sorted_indices]
     DL_sorted = DL[sorted_indices]
@@ -430,6 +561,28 @@ def main(name, dirname, plot= False):
     comp_sorted = comp[sorted_indices]
     params_sorted = params[sorted_indices]
 
+    # print('pp', p0)
+
+
+    # for i in range(len(p0)):
+    #     for j in range(len(p0[i])):
+    #         if d0[i][j] == 0 and p0[i][j] != 0:
+    #             print('p0', p0[i][j])
+                # print(fcn_list_sorted[i])
+    # print('p0', p0)
+    # sys.exit()
+
+    #sorted params and uncertainties
+    p0 = p0[sorted_indices]
+    p1 = p1[sorted_indices]
+    p2 = p2[sorted_indices]
+    p3 = p3[sorted_indices]
+
+    d0 = d0[sorted_indices]
+    d1 = d1[sorted_indices]
+    d2 = d2[sorted_indices]
+    d3 = d3[sorted_indices]
+
     #Calculate Prel
     Prel_DL = DL_sorted - DL_sorted[0]                # Always gives 0 for the 0th function, so this gets the highest Prel
 
@@ -438,20 +591,51 @@ def main(name, dirname, plot= False):
     Prel /= np.sum(Prel)  
 
     # Table by complexity
-    headers = ["Rank", "Function", "DL", "Prel", "negloglike", "codelen", "ayfeyn"] + [f'a{i}' for i in range(params_sorted.shape[1])] + ["comp"]
+    headers = ["Rank", "Function", "DL", "Prel", "negloglike", "codelen", "ayfeyn"] + ["Mean a0", "Std a0", "Mean a1", "Std a1", "divergence"] + ["comp"]
     table_data = []
 
+    negloglike_list = []
+    duplicate_list = []
+    no_duplicates_fcn_list = []  # List of unique functions
+    comp_list = []  # List of complexities for unique entries
+    DL_list = []  # List of DL values for unique entries
+    rank = 0
     for i in range(len(fcn_list_sorted)):
-        row = [
-            i + 1,
-            fcn_list_sorted[i],
-            f'{DL_sorted[i]:.2f}',  # Use scientific notation for large numbers
-            f'{Prel[i]:.2f}',
-            f'{negloglike_sorted[i]:.2f}',
-            f'{codelen_sorted[i]:.2f}',
-            f'{ayfeyn_sorted[i]:.2f}'
-        ] + [f'{p:.2f}' for p in params_sorted[i]] + [comp_sorted[i]]
-        table_data.append(row)
+        if DL_sorted[i] == np.inf or np.isnan(DL_sorted[i]):
+            continue
+        elif negloglike_sorted[i] in negloglike_list:
+            # Handle duplicates
+            duplicate_list.append(negloglike_sorted[i])
+            i_orig = negloglike_list.index(negloglike_sorted[i])  # Index of the original
+            print(
+                "%s is a duplicate of %s. "
+                "The original has complexity=%d, DL=%f, negloglike=%f "
+                "while the duplicate has complexity=%d, DL=%f, negloglike=%f"
+                % (
+                    fcn_list_sorted[i], no_duplicates_fcn_list[i_orig],
+                    comp_list[i_orig], DL_list[i_orig], negloglike_list[i_orig],
+                    comp_sorted[i], DL_sorted[i], negloglike_sorted[i]
+                )
+            )
+            continue
+
+        else:
+            # Process unique entries
+            rank += 1
+            negloglike_list.append(negloglike_sorted[i])
+            no_duplicates_fcn_list.append(fcn_list_sorted[i])  # Register function as unique
+            comp_list.append(comp_sorted[i])  # Register complexity
+            DL_list.append(DL_sorted[i])  # Register DL value
+            row = [
+                rank,
+                fcn_list_sorted[i],
+                f'{DL_sorted[i]:.2f}',  # Use scientific notation for large numbers
+                f'{Prel[i]:.2f}',
+                f'{negloglike_sorted[i]:.2f}',
+                f'{codelen_sorted[i]:.2f}',
+                f'{ayfeyn_sorted[i]:.2f}'
+            ] + [f'{p:.2e}' for p in params_sorted[i]] + [divergence[i]] + [comp_sorted[i]]
+            table_data.append(row)
 
     pretty_table = PrettyTable()
     pretty_table.field_names = headers
@@ -462,6 +646,15 @@ def main(name, dirname, plot= False):
 
     output_file = dirname + '/' +  savename
     print(f"Saving table to {output_file}")
+
+    #save table_data to a file
+    output_file_dat = dirname + '/' +  savename_dat
+    df = pd.DataFrame(table_data)
+
+    # Save to a .dat file
+    df.to_csv(output_file_dat, sep="\t", index=False)
+    print(f"Saving table to {output_file_dat}")
+
     # with open(output_file, 'w') as f:
     #     f.write(str(pretty_table))
 
@@ -474,3 +667,18 @@ def main(name, dirname, plot= False):
     # Save the table to a file
     with open(output_file, "w") as f:
         f.write(pretty_table.get_string())
+
+
+    #check for which fucntions we need to do global and local
+    get_functions_global_params(fcn_list_sorted, DL_sorted, p0, p1, p2, p3, d0, d1, d2, d3, comp_sorted, BIC = False)
+
+
+
+
+
+
+
+
+
+
+

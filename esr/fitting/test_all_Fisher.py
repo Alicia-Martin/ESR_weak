@@ -15,6 +15,8 @@ import esr.fitting.test_all as test_all
 from esr.fitting.sympy_symbols import *
 import esr.generation.simplifier as simplifier
 
+import numdifftools as nd
+
 
 import matplotlib.pyplot as plt
 
@@ -79,22 +81,37 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         
     """
 
-    nparam = simplifier.count_params([fcn_i], max_param)[0]
+    #max params is 6 if physicalize, 4 otherwise
+    # print(max_param)
+    nparam_fun = simplifier.count_params([fcn_i], max_param)[0]
+    nparam_total = nparam_fun + 2 if likelihood.physicalize else nparam_fun
 
     # Data
     xvar = likelihood.xvar
     yvar = likelihood.yvar
     yerr = likelihood.yerr
 
+    # print(fcn_i, nparam, flush=True)
+
     try:
-        if nparam == 0:
-            eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
-        elif nparam > 1:
-            all_a = ' '.join([f'a{i}' for i in range(nparam)])
+        if nparam_fun == 0:
+            if likelihood.physicalize:
+                rho0, rs = sympy.symbols("rho0 rs", real=True)
+                eq_numpy = sympy.lambdify([x, rho0, rs], eq, modules=["jax"])
+            else:
+                eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+        elif nparam_fun > 1:
+            all_a = ' '.join([f'a{i}' for i in range(nparam_fun)])
             all_a = list(sympy.symbols(all_a, real=True))
+            if likelihood.physicalize:
+                all_a += sympy.symbols("rho0 rs", real=True)
             eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
         else:
-            eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+            if likelihood.physicalize:
+                rho0, rs = sympy.symbols("rho0 rs", real=True)
+                eq_numpy = sympy.lambdify([x, a0, rho0, rs], eq, modules=["jax"])
+            else:
+                eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
     except Exception:
         # print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
         Fisher_diag = np.nan
@@ -105,8 +122,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
     chi2_fcn =likelihood.get_wrapped_like(loss_template)
 
-
-    if nparam > 0:
+    if nparam_total > 0:
         def fop(x):
             return chi2_fcn(jnp.array(x), xvar, yvar, yerr, check_nans =False)
     else:
@@ -116,59 +132,64 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     params = np.zeros(max_param)
     deriv = np.full(int(max_param * (max_param + 1) / 2), np.nan)
 
-    # Step-sizes to try in case the function misbehvaes
-    d_list = [1.e-5, 10.**(-5.5), 10.**(-4.5), 1.e-6, 1.e-4, 10.**(-6.5), 10.**(-3.5), 1.e-7, 1.e-3, 10.**(-7.5), 10.**(-2.5), 1.e-8, 1.e-2, 1.e-9, 1.e-10, 1.e-11]
-    
-    method_list = ["central", "forward", "backward"]
-
-    if nparam == 0:
+    if nparam_total == 0:
         codelen = 0
         # print(fcn_i, 'no params', flush=True)
         return params, negloglike, deriv, codelen
 
-    try:
-        if nparam > 1:
-            all_a = ' '.join([f'a{i}' for i in range(nparam)])
-            all_a = list(sympy.symbols(all_a, real=True))
-            eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
-        else:
-            eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
-    except Exception:
-        # print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
-        Fisher_diag = np.nan
-        deriv[:] = np.nan
-        return params, negloglike, deriv, codelen
+    # try:
+    #     if nparam > 1:
+    #         all_a = ' '.join([f'a{i}' for i in range(nparam)])
+    #         all_a = list(sympy.symbols(all_a, real=True))
+    #         eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+    #     else:
+    #         eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+    # except Exception:
+    #     # print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
+    #     Fisher_diag = np.nan
+    #     deriv[:] = np.nan
+    #     return params, negloglike, deriv, codelen
+    
+    # print(fcn_i)
     
     # Get Hessian
-    def get_deriv(Hmat, nparam, max_param=4):
-        # print('hola')
+    def get_deriv(Hmat, nparam_fun, max_fun_param, max_param=4):
+
         Hmat_max = np.zeros((max_param,max_param))
-        Hmat_max[:nparam, :nparam] = Hmat[:nparam, :nparam]
-        # print(Hmat_max)
-        # # Hmat_max[max_fun_param:, :nparam] = Hmat[nparam:, :nparam]
-        # # Hmat_max[:nparam, max_fun_param:] = Hmat[:nparam, nparam:]
-        # # Hmat_max[max_fun_param:,max_fun_param:] = Hmat[nparam:, nparam:]
+        Hmat_max[:nparam_fun, :nparam_fun] = Hmat[:nparam_fun, :nparam_fun]
+
+
+        Hmat_max[max_fun_param:, :nparam_fun] = Hmat[nparam_fun:, :nparam_fun]
+        Hmat_max[:nparam_fun, max_fun_param:] = Hmat[:nparam_fun, nparam_fun:]
+        Hmat_max[max_fun_param:,max_fun_param:] = Hmat[nparam_fun:, nparam_fun:]
+
 
         deriv = Hmat_max[np.triu_indices(max_param)]
         return deriv
-    theta_ML = theta_ML[:nparam]
+    
+    #CHANGE THIS
+    # theta_ML = theta_ML[:nparam]
+    max_fun_param = max_param + (nparam_fun - nparam_total)
+    theta_ML = np.append(theta_ML[:nparam_fun], theta_ML[max_fun_param:])
     hessian_template = likelihood.get_loss(eq_numpy, value = 'hessian')
     Hmat = hessian_template(theta_ML, likelihood.xvar, likelihood.yvar, likelihood.yerr)
     
     #Other related quantities
     Fisher_diag = jnp.diag(Hmat)
+    # Fisher_diag = jnp.array([jnp.nan]*len(Fisher_diag))
+    # print('Fisher_diag aqui', fcn_i, Fisher_diag)
     Delta = np.sqrt(12./Fisher_diag)
     # Delta = theta_ML
-    deriv = get_deriv(Hmat, nparam, max_param=max_param)
+    deriv = get_deriv(Hmat, nparam_fun, max_fun_param,  max_param=max_param)
     Nsteps = abs(np.array(theta_ML))/Delta
 
-    # Hfun2 = nd.Hessian(fop)
+    # Hfun2 = nd.Hessian(fop, step=np.array([1e-1, 1e-20], dtype=np.float128), method='central')
     # Hmat2 = Hfun2(theta_ML)
     # Fisher_diag2 = jnp.diag(Hmat2)
     # Delta2 = np.sqrt(12./Fisher_diag2)
     # print('Delta2', Delta2)
 
-    print(fcn_i, Delta)
+    # print(fcn_i, Delta)
 
 
     loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
@@ -176,31 +197,41 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
 
 
     # #Plot likelihood
-    # Delta_plot = 5
-    # x_range = np.linspace(theta_ML - Delta_plot, theta_ML + Delta_plot, 10**2)
-    # # x_range = np.append(x_range, theta_ML)
-    # loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
-    # chi2_fcn = likelihood.get_wrapped_like(loss_template)
+    # if fcn_i == 'a0*pow(x,a1)':
+    # for param_idx in range(len(theta_ML)):
+    #     # Delta_plot = theta_ML[param_idx]*10
+    #     Delta_plot = 2
 
-    # grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
-    # grad_fcn = likelihood.get_wrapped_like(grad_template)
 
-    # nll = []
-    # # grads = []
-    # for i in x_range:
 
-    #     negloglike = chi2_fcn([i], xvar, yvar, yerr)
-    #     nll = np.append(nll, negloglike)
+    #     x_range = np.linspace(theta_ML[param_idx] - Delta_plot, theta_ML[param_idx] + Delta_plot, 10**3)
+    #     # x_range = np.append(x_range, theta_ML[param_idx])
+    #     loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
+    #     chi2_fcn = likelihood.get_wrapped_like(loss_template)
+
+    #     grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
+    #     grad_fcn = likelihood.get_wrapped_like(grad_template)
+
+    #     nll = []
+    #     # print(x_range)
+    #     # grads = []
+
+    #     for i in x_range:
+    #         params = np.copy(theta_ML)
+    #         params[param_idx] = i
+
+    #         negloglike = chi2_fcn(params, xvar, yvar, yerr)
+    #         nll = np.append(nll, negloglike)
+
+    #         # grad = grad_fcn(np.array([i]), xvar, yvar, yerr)
+    #         # grads = np.append(grads, grad)
+
+            
+    #         # print(jnp.min(nll))
     #     # print(nll)
-
-    #     # grad = grad_fcn(np.array([i]), xvar, yvar, yerr)
-    #     # grads = np.append(grads, grad)
-
-        
-    # # print(jnp.min(nll))
-    # plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
-    # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
-    # plt.show()
+    #     plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
+    #     # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
+    #     plt.show()
     # sys.exit()
 
     # plt.plot(x_range, grads)
@@ -208,19 +239,23 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # plt.show()
     
     # 2nd derivatives of -log(L) wrt params
-    Fisher_diag = np.array([Hmat[i,i] for i in range(nparam)])
+    # Fisher_diag = np.array([Hmat[i,i] for i in range(nparam)])
     
     # Precision to known constants
     # Delta = np.sqrt(12./Fisher_diag)
-    Nsteps = abs(np.array(theta_ML))/Delta
+    # Nsteps = abs(np.array(theta_ML))/Delta
+
 
     # Must indicate a bad fcn, so just need to make sure it doesn't have a good -log(L)
-    if (np.sum(Fisher_diag <= 0.) > 0.) or (np.sum(np.isnan(Fisher_diag)) > 0):
-        print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
+    if (np.sum(Fisher_diag <= 0.) > 0.) or (np.sum(np.isnan(Fisher_diag)) > 0) or (np.sum(np.isinf(Fisher_diag)) > 0):
+        print("BAD:", fcn_i, negloglike, Fisher_diag)
+        # print(deriv)
+        # print('here')
         codelen = np.nan
+        # print(Delta)
         return params, negloglike, deriv, codelen
     
-    k = nparam
+    k = nparam_total
     # print(fcn_i, k)
     theta_ML_orig = np.copy(theta_ML)
     negloglike_orig = np.copy(negloglike)
@@ -239,7 +274,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
             kept_mask = Nsteps>=1
         else:
             # Let's see if setting any of the parameters to zero is ok
-            try_idx = np.arange(nparam)[Nsteps < 1]
+            try_idx = np.arange(nparam_total)[Nsteps < 1]
             for r in reversed(range(1, len(try_idx))):
                 for idx in itertools.combinations(try_idx, r):
                     theta_ML = np.copy(theta_ML_orig)
@@ -255,13 +290,15 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
             else:
                 theta_ML = theta_ML_orig
                 negloglike = negloglike_orig
-                k = nparam
+                k = nparam_total
             
         if k<0:
             print("This shouldn't have happened", flush=True)
             quit()
         elif k==0:
             codelen = 0
+            # print('I am here', flush=True)
+            # print('negloglike', negloglike)
             return params, negloglike, deriv, codelen
         
         Fisher_diag = Fisher_diag[kept_mask]     # Only consider these parameters in the codelen
@@ -286,9 +323,15 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
             return params, negloglike, deriv, codelen
 
     #Save params
-    params[:] = np.pad(theta_ML, (0, max_param-len(theta_ML)))
+    params = np.zeros(max_param)
+    params[:nparam_fun] = theta_ML[:nparam_fun]
+    params[max_fun_param:] = theta_ML[nparam_fun:]
+    # params[:] = np.pad(theta_ML, (0, max_param-len(theta_ML)))
 
-    print('codelen', codelen)
+    # print('params', params)
+
+    # print('codelen', codelen)
+    # print(fcn_i)
 
     return params, negloglike, deriv, codelen
 
@@ -335,8 +378,7 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
 
         theta_ML = params_proc[i,:]
 
-        print(i)
-            
+        # print(fcn_list_proc[i])
         try:
             fcn_i = fcn_list_proc[i].replace('\n', '')
             fcn_i = fcn_list_proc[i].replace('\'', '')
@@ -359,7 +401,7 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
             deriv[i,:] = 0.
             codelen[i] = 0
 
-        print(fcn_i, negloglike[i], codelen[i], flush=True)
+        # print(fcn_i, negloglike[i], codelen[i], flush=True)
         
     # out_arr = np.transpose(np.vstack([codelen, negloglike] + [params[:,i] for i in range(max_param)]))
 

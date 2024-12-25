@@ -41,12 +41,17 @@ def main(comp, likelihood, print_frequency=1000):
     with open(allfn_file, "r") as f:         # All
         fcn_list_all = f.read().splitlines()
 
+    max_params = 4
+    if likelihood.physicalize:
+        max_params += 2
+
     data = np.genfromtxt(likelihood.out_dir + "/codelen_matches_comp"+str(comp)+".dat") # All
     negloglike = data[:,0]
     codelen = data[:,1]
     index = data[:,2]
     # params = data[:,3:]
-    params = data[:,3:-3]
+    params = data[:,3:3 + max_params]
+    delta = data[:,3 + max_params:-3]
     Nconv = data[:,-3]
     Niter = data[:,-2]
     time = data[:, -1]
@@ -63,6 +68,7 @@ def main(comp, likelihood, print_frequency=1000):
 
     DL_min = np.zeros(len(fcn_list_proc))
     params_min = np.zeros((len(fcn_list_proc), params.shape[1]))  # These are all now specific to the proc
+    delta_min = np.zeros((len(fcn_list_proc), delta.shape[1]))
 
     fcn_min = [None] * len(fcn_list_proc)
     negloglike_min = np.zeros(len(fcn_list_proc))
@@ -85,6 +91,7 @@ def main(comp, likelihood, print_frequency=1000):
         Nconv_i, Niter_i, time_i = Nconv[mask], Niter[mask], time[mask]
         fcn_list_all_i = [fcn_list_all[j] for j in range(len(mask)) if mask[j]]  # All corresponding fcns
         params_i = params[mask, :]
+        delta_i = delta[mask, :]
         DL = negloglike_i + codelen_i + aifeyn_i  # Calculate DL
 
         # If all DL values are NaN, skip this equation
@@ -96,6 +103,7 @@ def main(comp, likelihood, print_frequency=1000):
         DL_min[i] = np.nanmin(DL)
         min_idx_local = np.nanargmin(DL) 
         params_min[i, :] = params_i[min_idx_local, :] 
+        delta_min[i, :] = delta_i[min_idx_local, :]
         fcn_min[i] = fcn_list_all_i[min_idx_local] 
 
         # Map the local index back to the global index in the 'index' array
@@ -111,9 +119,14 @@ def main(comp, likelihood, print_frequency=1000):
 
         # out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min]))
         # print(negloglike_min)
-     
+    
+    for i in range(len(params_min)):         
+        for j in range(len(params_min[i])):
+            if delta_min[i,j] == 0 and params_min[i,j] != 0:
+                print(fcn_min[i], params_min[i], delta_min[i])
 
-    out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min] + [Nconv_min, Niter_min, time_min]))
+
+    out_arr = np.transpose(np.vstack([DL_min] + [params_min[:,i] for i in range(params_min.shape[1])] + [delta_min[:,i] for i in range(params_min.shape[1])] + [negloglike_min, codelen_min, aifeyn_min] + [Nconv_min, Niter_min, time_min]))
     prefix = likelihood.combineDL_prefix
 
     np.savetxt(likelihood.temp_dir + '/'+prefix+str(comp)+'_'+str(rank)+'.dat', out_arr, fmt='%.16e')        # Save the data for this proc in Partial
@@ -197,7 +210,7 @@ def main(comp, likelihood, print_frequency=1000):
         if os.path.exists(likelihood.out_dir + '/'+likelihood.final_prefix+str(comp)+'.dat'):           # Start this file from scratch here
             os.remove(likelihood.out_dir + '/'+likelihood.final_prefix+str(comp)+'.dat')
 
-        Nfuncs = 10
+        Nfuncs = 500
 
         Prel_DL = np.zeros(len(negloglike_sort))+np.inf
         negloglike_list = []                    # Store all unique negloglikes

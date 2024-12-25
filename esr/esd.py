@@ -160,13 +160,14 @@ class ExcessSurfaceDensity:
     def check_density(self, rhos):
         # Check if any densities are below the threshold (-1e-8)
         below_threshold = np.any(rhos < -1e-8)
+
+        # jax.debug.print('below_threshold {x}', x = rhos)
         
         # Check if any densities are infinite
-        # has_infinite_values = np.any(np.isinf(rhos))
-        
+        has_infinite_values = np.any(np.isinf(rhos))
 
-        # return np.logical_or(below_threshold, has_infinite_values)
-        return below_threshold
+        return np.logical_or(below_threshold, has_infinite_values)
+        # return below_threshold
     
     def _esd_first_term_integrand_func(self, xs):
         """First term integrand function for ESD calculation."""
@@ -204,6 +205,7 @@ class ExcessSurfaceDensity:
                 dxs = np.moveaxis(dxs, self.radial_axis_to_broadcast + 1, self.density_axis)
 
             thetas = np.linspace(0, np.pi / 2, self.num_points)
+            # jax.debug.print('second {x}', x = thetas )
             dthetas = np.gradient(thetas, axis=0)
             second_term_integrand = self._esd_second_term_integrand_func(thetas)
 
@@ -219,18 +221,23 @@ class ExcessSurfaceDensity:
             # def handle_large_error():
             #     jax.debug.print('WARNING: ESD calculation has a large numerical error {x}', x = self.params)
 
-            # jax.lax.cond(num_error < MAX_ERROR_TOLERANCE, handle_large_error, do_nothng)
-            # jax.debug.print('second {x}', x = first_term )
+            # # jax.lax.cond(num_error < MAX_ERROR_TOLERANCE, handle_large_error, do_nothng)
+            # jax.debug.print('first {x}', x = first_term )
+            # jax.debug.print('second {x}', x = second_term )
+            # jax.debug.print('{x}', x = first_term - second_term)
             return first_term - second_term
 
         def handle_invalid_density():
             return np.full_like(self.radii, np.inf)
+        
+        # jax.debug.print('has_negative_rhos {x}', x = has_negative_rhos)
 
         esd_result = jax.numpy.where(
             has_negative_rhos,
             handle_invalid_density(),
             compute_valid_esd(),
         )
+        # jax.debug.print('{x}', x = esd_result)
         return esd_result
 
     @classmethod

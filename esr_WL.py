@@ -79,7 +79,7 @@ def plot_single(fcn, measured, likelihood, ax1, max_param=4, tmax=5, try_integra
 
 def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
         basis_functions = [["x", "a"],  # type0
-                ["inv", "abs", "log", "exp"],  # type1
+                ["inv", "abs", "log", "exp", "re", "im"],  # type1
                 ["+", "*", "-", "/", "pow"]]  # type2
         
         # print(run_name)
@@ -87,7 +87,9 @@ def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
         #Likelihood
         likelihood = WLLikelihood(data_file, run_name, data_dir=None, fn_set = 'core_maths') 
 
-        chi2, DL, labels, params = fit_from_string(fn,
+        print('fn:', fn)
+
+        chi2, DL, labels, params, delta = fit_from_string(fn,
                                                         basis_functions,
                                                         likelihood,
                                                         method = method,
@@ -95,26 +97,25 @@ def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
                                                         verbose=True,
                                                         log_opt=log_opt,
                                                         return_params=True)
+        
 
         plot_single(fn, params, likelihood, ax)
 
         #calculate the mass and concentration
-        fcn_i, eq= likelihood.run_sympify(fn)
-        k = simplifier.count_params([fcn_i], 4)[0]
-        if k == 0:
-            eq_numpy = sympy.lambdify([x], eq, modules=["numpy"])
-        elif k > 1:
-            all_a = ' '.join([f'a{i}' for i in range(k)])
-            all_a = list(sympy.symbols(all_a, real=True))
-            eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
-        else:
-            eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+        # fcn_i, eq= likelihood.run_sympify(fn)
+        # k = simplifier.count_params([fcn_i], 4)[0]
+        # if k == 0:
+        #     eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+        # elif k > 1:
+        #     all_a = ' '.join([f'a{i}' for i in range(k)])
+        #     all_a = list(sympy.symbols(all_a, real=True))
+        #     eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+        # else:
+        #     eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
 
-        M200 = likelihood.M_delta(200, eq_numpy, params)
-        print('M200:', M200)
+        # M200, r200, error_M200 = likelihood.M_delta(200, eq_numpy, params, delta)
 
         return chi2, params, DL
-
 
 
 def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-Mead", log_opt=True):
@@ -124,11 +125,11 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
         log = ''
 
     #Likelihood
-    likelihood = WLLikelihood(data_file, run_name + log, data_dir=None, fn_set = 'core_maths')   
+    likelihood = WLLikelihood(data_file, run_name + log, data_dir=None, fn_set = 'core_maths', physicalize=True)   
     
     # run esr
-    # esr.fitting.test_all.main(comp, likelihood, try_integration=try_integration, log_opt=log_opt, method=method)
-    # esr.fitting.test_all_Fisher.main(comp, likelihood, tmax=5, try_integration=try_integration)
+    # esr.fitting.test_all.main(comp, likelihood, try_integration=try_integration, log_opt=log_opt, method=method, ignore_previous_eqns=True)
+    esr.fitting.test_all_Fisher.main(comp, likelihood, tmax=5, try_integration=try_integration)
     esr.fitting.match.main(comp, likelihood, tmax=5, try_integration=try_integration)
     # esr.fitting.combine_DL.main(comp, likelihood)
     #esr.fitting.plot.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='log', yscale='log')
@@ -143,78 +144,72 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
 # run code for a single set of data
 #------------------------------------------------------------
 
-# comp = 6
-# try_integration = False
-# method = "BFGS"
-# log_opt = False
-# # data_file = 'esr/dark_matter_data2.txt'
-# name = 111
-# data_file = 'XXL/' + str(name) + '.txt'
-# run_name = 'WL_' + str(name)
-
-# if rank == 0:
-#     print('method:', method, ', log_opt:', log_opt, "cluster:", name, flush=True)
-
-# start = time.time()
-# fit_galaxy(data_file, run_name, comp, try_integration=try_integration, method=method, log_opt=log_opt)
-# end = time.time()
-
-# if rank == 0:
-#     print('Total time taken:', end - start, flush=True)
-
-
-#------------------------------------------------------------
-# run code for one fucntion
-#------------------------------------------------------------
-
+comp = 5
+try_integration = False
 method = "Nelder-Mead"
 log_opt = False
-name = 76
+# data_file = 'esr/dark_matter_data2.txt'
+name = 152
 data_file = 'XXL/' + str(name) + '.txt'
 run_name = 'WL_' + str(name)
 
-# dtafile all clusters
-# data_file = 'XXL/combined_data.txt'
-# run_name = 'WL'
-
-fn1 =  'pow(Abs(a0*x - pow(x,x)),a1)'
-fn2 =  'a1/(-x + pow(Abs(a0),x))'
-fn3 = '(a0 + a1/x)/x'
-fn4 = 'a0*(x + 1/x)/x'
-fn5 = 'a0*(a1*x + 1/x)'
-
-fn_list = [fn1, fn2, fn3, fn4, fn5]
-
-fn_list = ['1/(x*pow(x,(pow(Abs(a0),(-x)))))']
-
-# fn = 'a0/(x*(x + a1)^2)' #NFW
-# fn = '[[[a0/x**3'
-# fn = 'a1 + a2*x + a0*x**2'
-# fn = 'pow(x,(a0*x))'
-
-# fn = 'a0*pow(x, a1)'
-# fn = '1/(a0 - x)'
-# fn = 'pow(0,a0)'
-# fn = '1/x + a0'
-
 if rank == 0:
-    print('method:', method, ', log_opt:', log_opt, flush=True)
+    print('method:', method, ', log_opt:', log_opt, "cluster:", name, flush=True)
 
-# Create a figure and axis for the plot
-fig, ax = plt.subplots(figsize=(7, 5))
-
-for fn in fn_list:
-    start = time.time()
-    chi2, params, algo = run_fit_single(data_file, run_name, fn, log_opt, method, ax)
-    print(chi2, params)
-    end = time.time()
-plt.legend()
-plt.show()
-
-
+start = time.time()
+fit_galaxy(data_file, run_name, comp, try_integration=try_integration, method=method, log_opt=log_opt)
+end = time.time()
 
 if rank == 0:
     print('Total time taken:', end - start, flush=True)
+
+
+# ------------------------------------------------------------
+# run code for one fucntion
+# ------------------------------------------------------------
+
+# method = "Nelder-Mead"
+# log_opt = False
+# name = 114
+# data_file = 'XXL/' + str(name) + '.txt'
+# run_name = 'WL_' + str(name)
+
+# # dtafile all clusters
+# # data_file = 'XXL/combined_data.txt'
+# # run_name = 'WL'
+
+# fn1 =  'pow(Abs(a0*x - pow(x,x)),a1)'
+# fn2 =  'a1/(-x + pow(Abs(a0),x))'
+# fn3 = '(a0 + a1/x)/x'
+# fn4 = 'a0*(x + 1/x)/x'
+# fn5 = 'a0*(a1*x + 1/x)'
+
+# fn_list = [fn1, fn2, fn3, fn4, fn5]
+
+# # fn_list = ['a0/(1 - a1) - x/(1 - a1)']
+
+# # fn_list = ['x + 1/(a0 + x)']
+# # fn_list = ['pow(x, a0)']
+# # fn_list = ['(a0 + (x + a1)/x)/x']
+# # fn_list = ['x*pow(Abs(a0),(pow(x,a1))) ']
+# fn_list = ['a0/(x*pow(Abs(a1 + x),a2))']
+# if rank == 0:
+#     print('method:', method, ', log_opt:', log_opt, flush=True)
+
+# # Create a figure and axis for the plot
+# fig, ax = plt.subplots(figsize=(7, 5))
+
+# for fn in fn_list:
+#     start = time.time()
+#     chi2, params, algo = run_fit_single(data_file, run_name, fn, log_opt, method, ax)
+#     print(chi2, params)
+#     end = time.time()
+#     print('Total time taken:', end - start, flush=True)
+# plt.legend()
+# plt.show()
+
+# if rank == 0:
+#     print('Total time taken:', end - start, flush=True)
     
 #------------------------------------------------------------
 #run pareto plot

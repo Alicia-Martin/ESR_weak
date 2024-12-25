@@ -1,8 +1,11 @@
 # Combine data from all clusters
 import numpy as np
 import matplotlib.pyplot as plt
+import glob
+import os
+import sys
 
-galaxy_names_file = '10_clusters.txt'
+galaxy_names_file = 'all_clusters.txt'
 
 #open all files in directory XXL with these names
 with open(galaxy_names_file) as f:
@@ -26,6 +29,16 @@ for name in names:
     x = np.append(x, xvar)
     y = np.append(y, yvar)
     yerr = np.append(yerr, yerr_value)
+
+#save_all_data in the sme format as the original files
+datafile= 'XXL/all_clusters.txt'
+
+with open(datafile, 'w') as file:
+    file.write(' '.join(map(str, x)) + '\n')
+    file.write(' '.join(map(str, y)) + '\n')
+    file.write(' '.join(map(str, yerr)) + '\n')
+
+sys.exit()
 
 
 #Take out nans
