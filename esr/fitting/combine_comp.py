@@ -462,6 +462,40 @@ def get_functions_global_params(fcn_list_sorted, DL_sorted, p0, p1, p2, p3, u1, 
         #     for i in range(len(func_to_save)):
         #         # f.write(func_to_save[i] + ', ' + str(indices_to_save[i]) + ', ' + str(comps_to_save[i]) + '\n')
         #         f.write(f'{func_to_save[i]}|{str(indices_to_save[i])}|{comps_to_save[i]}\n')
+                
+def statistics_params(fcn_list_sorted, p0, p1):
+
+    #check if fucntion has abs and around which parameter
+    def check_abs(fcn):
+        if 'Abs' in fcn:
+            if 'Abs(a0)' in fcn and not 'Abs(a1)' in fcn:
+                return 0
+            elif 'Abs(a1)' in fcn and not 'Abs(a0)' in fcn:
+                return 1
+            elif 'Abs(a0)' and 'Abs(a1)' in fcn:
+                return 2
+        else:
+            return -1
+
+    for fcn in fcn_list_sorted:
+        abs_params = check_abs(fcn_list_sorted)
+        if abs_params == 0:
+            p0 = np.abs(p0)
+        elif abs_params == 1:
+            p1 = np.abs(p1)
+        elif abs_params == 2:
+            p0 = np.abs(p0)
+            p1 = np.abs(p1)
+
+        p0_nozero = p0[p0 != 0]
+        p1_nozero = p1[p1 != 0]
+
+        mean_p0 = np.mean(p0_nozero)
+        mean_p1 = np.mean(p1_nozero)
+        std_p0 = np.std(p0_nozero)
+        std_p1 = np.std(p1_nozero)
+
+    return mean_p0, mean_p1, std_p0, std_p1
 
 def main(name, dirname, plot= False):
     savename = 'combine_all_comp_' + str(name) + '.txt'
@@ -626,6 +660,8 @@ def main(name, dirname, plot= False):
             no_duplicates_fcn_list.append(fcn_list_sorted[i])  # Register function as unique
             comp_list.append(comp_sorted[i])  # Register complexity
             DL_list.append(DL_sorted[i])  # Register DL value
+            #Claculate mean and std of params
+            mean_p0, mean_p1, std_p0, std_p1 = statistics_params(fcn_list_sorted,p0[i], p1[i])
             row = [
                 rank,
                 fcn_list_sorted[i],
@@ -633,8 +669,9 @@ def main(name, dirname, plot= False):
                 f'{Prel[i]:.2f}',
                 f'{negloglike_sorted[i]:.2f}',
                 f'{codelen_sorted[i]:.2f}',
-                f'{ayfeyn_sorted[i]:.2f}'
-            ] + [f'{p:.2e}' for p in params_sorted[i]] + [divergence[i]] + [comp_sorted[i]]
+                f'{ayfeyn_sorted[i]:.2f}'] + [
+                f'{mean_p0:.2f}', f'{std_p0:.2f}', f'{mean_p1:.2f}', f'{std_p1:.2f}'] + [divergence[i]] + [comp_sorted[i]]
+            # ] + [f'{p:.2e}' for p in params_sorted[i]] + [divergence[i]] + [comp_sorted[i]]
             table_data.append(row)
 
     pretty_table = PrettyTable()

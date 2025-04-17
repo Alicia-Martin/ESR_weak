@@ -225,7 +225,10 @@ def main(comp, likelihood, print_frequency=1000):
         Prel /= np.sum(Prel)                # Relative probability of fcn, normalised over the top 1000 functions just of this complexity
 
         ptab = PrettyTable()
-        names = ["Rank", "Function", "L(D)", "Prel", "-logL", "Codelen", "AIFeyn"] + [f"a{i}" for i in range(params.shape[1])]
+        names = ["Rank", "Function", "L(D)", "Prel", "-logL", "Codelen", "AIFeyn"] + [f"a{i}" for i in range(4)]
+
+        if likelihood.physicalize:
+            names += ["rho0", "rs"]
         #Time and other things
         names += ["Nconv", "Niter", "Time"]
         ptab.field_names = names

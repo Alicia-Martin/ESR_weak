@@ -187,7 +187,8 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # Hmat2 = Hfun2(theta_ML)
     # Fisher_diag2 = jnp.diag(Hmat2)
     # Delta2 = np.sqrt(12./Fisher_diag2)
-    # print('Delta2', Delta2)
+    print('Fisher_diag', Fisher_diag)
+    print('Delta', Delta)
 
     # print(fcn_i, Delta)
 
@@ -200,7 +201,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # if fcn_i == 'a0*pow(x,a1)':
     # for param_idx in range(len(theta_ML)):
     #     # Delta_plot = theta_ML[param_idx]*10
-    #     Delta_plot = 2
+    #     Delta_plot = 0.01
 
 
 
@@ -232,7 +233,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     #     plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
     #     # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
     #     plt.show()
-    # sys.exit()
+    #     sys.exit()
 
     # plt.plot(x_range, grads)
     # plt.plot(theta_ML,grad_fcn(theta_ML, xvar, yvar, yerr) , 'ro')
@@ -255,6 +256,49 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         # print(Delta)
         return params, negloglike, deriv, codelen
     
+        # Check if the function has any cutoffs in the likelihood
+    # Delta[~kept_mask] = 0.
+    # cutoff_Delta = np.copy(Delta)
+    # cutoff_Delta[Nsteps < 1] = theta_ML[Nsteps < 1]
+    invalid_mask = np.zeros_like(theta_ML, dtype=bool)
+    # print('ESTO')
+    # print(fop(theta_ML + Delta))
+    # print(fop(theta_ML - Delta))
+    #maybe need to check this in a different way
+    for i, theta_i in enumerate(theta_ML):
+        #check each param ibdependently
+        thetas_plus = np.copy(theta_ML)
+        thetas_plus[i] = theta_ML[i] + Delta[i]
+
+        thetas_minus = np.copy(theta_ML)
+        thetas_minus[i] = theta_ML[i] - Delta[i]
+
+        # print('thetas_plus', thetas_plus, fop(thetas_plus))
+        # print('thetas_minus', thetas_minus, fop(thetas_minus))
+
+        if np.isinf(fop(thetas_plus)) or np.isinf(fop(thetas_minus)):
+                codelen = np.nan
+                # deriv = np.nan*np.ones(deriv.shape)
+                invalid_mask[i] = True
+                print(fcn_i, 'cutoffs', flush=True)
+        # return params, negloglike, deriv, codelen
+                
+    # Modify only the relevant entries in deriv
+    # print('deriv', deriv)
+    if np.any(invalid_mask):
+        triu_indices = np.triu_indices(max_param)
+        row_indices, col_indices = triu_indices
+        # Find the indices in 'deriv' that correspond to affected parameters
+        invalid_entries = np.where(np.logical_or(invalid_mask[row_indices], invalid_mask[col_indices]))[0]
+
+        # Set only those specific entries to NaN
+        deriv[invalid_entries] = np.nan
+        codelen = np.nan
+        return params, negloglike, deriv, codelen
+
+    # print('deriv', deriv)
+    # codelen = np.nan if np.any(invalid_mask) else codelen
+    
     k = nparam_total
     # print(fcn_i, k)
     theta_ML_orig = np.copy(theta_ML)
@@ -267,6 +311,8 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         # one precision step, and recompute -log(L).
         theta_ML[Nsteps<1] = 0.
         negloglike = fop(theta_ML)
+        # print('theta_ML', theta_ML)
+        # print('negloglike', negloglike)
 
         # For the codelen, we effectively don't have the parameter that had Nsteps<1
         if np.isfinite(negloglike):
@@ -312,16 +358,6 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     theta_ML = theta_ML_orig
     theta_ML[~kept_mask] = 0.
 
-    # Check if the function has any cutoffs in the likelihood
-    Delta[~kept_mask] = 0.
-    cutoff_Delta = np.copy(Delta)
-    cutoff_Delta[Nsteps < 1] = theta_ML[Nsteps < 1]
-    if np.isinf(fop(theta_ML + Delta)) or np.isinf(fop(theta_ML - Delta)):
-            codelen = np.nan
-            deriv = np.nan*np.ones(deriv.shape)
-            print(fcn_i, 'cutoffs', flush=True)
-            return params, negloglike, deriv, codelen
-
     #Save params
     params = np.zeros(max_param)
     params[:nparam_fun] = theta_ML[:nparam_fun]
@@ -332,6 +368,8 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
 
     # print('codelen', codelen)
     # print(fcn_i)
+
+    # sys.exit()
 
     return params, negloglike, deriv, codelen
 
@@ -367,6 +405,9 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
     codelen = np.zeros(len(fcn_list_proc))          # This is now only for this proc
     params = np.zeros([len(fcn_list_proc), max_param])
     deriv = np.zeros([len(fcn_list_proc), int(max_param * (max_param+1) / 2)])
+
+    # print(len(fcn_list_proc), flush=True)
+    # sys.exit()
 
     for i in range(len(fcn_list_proc)):           # Consider all possible complexities
         if rank == 0 and ((i == 0) or ((i+1) % print_frequency == 0)):

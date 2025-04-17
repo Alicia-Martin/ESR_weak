@@ -265,6 +265,7 @@ class WLLikelihood(Likelihood):
         else:
             return jax.jit(jax.value_and_grad(f_loss))
     
+    
     def get_wrapped_like(self, loss_template, signs=None):
         
         def handle_nans(negloglike):

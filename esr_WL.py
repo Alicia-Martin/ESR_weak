@@ -42,14 +42,44 @@ def plot_single(fcn, measured, likelihood, ax1, max_param=4, tmax=5, try_integra
 
         fcn_i, eq= likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
         
-        if k == 0:
-            eq_numpy = sympy.lambdify([x], eq, modules=["numpy"])
-        elif k > 1:
-            all_a = ' '.join([f'a{i}' for i in range(k)])
-            all_a = list(sympy.symbols(all_a, real=True))
-            eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+        # if k == 0:
+        #     eq_numpy = sympy.lambdify([x], eq, modules=["numpy"])
+        # elif k > 1:
+        #     all_a = ' '.join([f'a{i}' for i in range(k)])
+        #     all_a = list(sympy.symbols(all_a, real=True))
+        #     eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["numpy"])
+        # else:
+        #     eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+
+        if likelihood.physicalize:
+            n_fun_params = k
+            nparams  = n_fun_params + 2
+            n_extra = 2
         else:
-            eq_numpy = sympy.lambdify([x, a0], eq, modules=["numpy"])
+            n_fun_params = k
+            n_extra = 0
+        # print(eq)
+        # sys.exit()
+        print('nparams', n_extra)
+        if n_fun_params == 0 and n_extra == 0:
+            eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+        elif n_fun_params == 0 and n_extra > 0:
+                rho0, rs = sympy.symbols("rho0 rs", real=True)
+                eq_numpy = sympy.lambdify([x, rho0, rs], eq, modules=["jax"])
+        elif n_fun_params > 1:
+            all_a = ' '.join([f'a{i}' for i in range(n_fun_params)])
+            all_a = list(sympy.symbols(all_a, real=True))
+            if n_extra>0:
+                print('HERE')
+                all_a += sympy.symbols("rho0 rs", real=True)
+            eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+        elif n_fun_params == 1:
+            if n_extra>0:
+                # print('HERE')
+                rho0, rs = sympy.symbols("rho0 rs", real=True)
+                eq_numpy = sympy.lambdify([x, a0, rho0, rs], eq, modules=["jax"])
+            else:
+                eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
         ypred = eq_numpy(likelihood.xvar, *measured)
 
     
@@ -63,18 +93,22 @@ def plot_single(fcn, measured, likelihood, ax1, max_param=4, tmax=5, try_integra
         ax1.errorbar(likelihood.xvar, likelihood.yvar, yerr=likelihood.yerr, fmt='.')
         ax1.set_xscale(xscale)
         ax1.set_yscale(yscale)
-        # plt.show()
+        plt.show()
 
         #Plot density
-        # fig2 = plt.figure(figsize=(7,5))
-        # ax2  = fig2.add_axes([0.10,0.10,0.70,0.85])
+        x_array = np.linspace(0,60, 1000)
+        y_pred = eq_numpy(x_array, *measured)
+        fig2 = plt.figure(figsize=(7,5))
+        ax2  = fig2.add_axes([0.10,0.10,0.70,0.85])
+
+        ax2.plot(x_array, y_pred)
 
         # if np.isscalar(y_pred2):
         #     ax2.plot(x_array, [y_pred2]*len(x_array))
         # else:
         #     ax2.plot(x_array, y_pred2)
-        # ax2.set_xscale(xscale)
-        # ax2.set_yscale(yscale)
+        ax2.set_xscale(xscale)
+        ax2.set_yscale(yscale)
         # plt.show()
 
 def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
@@ -85,7 +119,7 @@ def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
         # print(run_name)
 
         #Likelihood
-        likelihood = WLLikelihood(data_file, run_name, data_dir=None, fn_set = 'core_maths') 
+        likelihood = WLLikelihood(data_file, run_name, data_dir=None, fn_set = 'core_maths', physicalize=False) 
 
         print('fn:', fn)
 
@@ -98,7 +132,7 @@ def run_fit_single(data_file, run_name, fn, log_opt, method, ax):
                                                         log_opt=log_opt,
                                                         return_params=True)
         
-
+        print('params', params)
         plot_single(fn, params, likelihood, ax)
 
         #calculate the mass and concentration
@@ -125,14 +159,14 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
         log = ''
 
     #Likelihood
-    likelihood = WLLikelihood(data_file, run_name + log, data_dir=None, fn_set = 'core_maths', physicalize=True)   
+    likelihood = WLLikelihood(data_file, run_name + log, data_dir=None, fn_set = 'core_maths', physicalize=False)   
     
     # run esr
-    # esr.fitting.test_all.main(comp, likelihood, try_integration=try_integration, log_opt=log_opt, method=method, ignore_previous_eqns=True)
-    esr.fitting.test_all_Fisher.main(comp, likelihood, tmax=5, try_integration=try_integration)
-    esr.fitting.match.main(comp, likelihood, tmax=5, try_integration=try_integration)
+    esr.fitting.test_all.main(comp, likelihood, try_integration=try_integration, log_opt=log_opt, method=method, ignore_previous_eqns=False)
+    # esr.fitting.test_all_Fisher.main(comp, likelihood, tmax=5, try_integration=try_integration)
+    # esr.fitting.match.main(comp, likelihood, tmax=5, try_integration=try_integration)
     # esr.fitting.combine_DL.main(comp, likelihood)
-    #esr.fitting.plot.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='log', yscale='log')
+    # esr.fitting.plot.main(comp, likelihood, tmax=5, try_integration=try_integration, xscale='log', yscale='log')
 
      
     
@@ -144,72 +178,90 @@ def fit_galaxy(data_file, run_name, comp, try_integration=False, method="Nelder-
 # run code for a single set of data
 #------------------------------------------------------------
 
-comp = 5
-try_integration = False
-method = "Nelder-Mead"
-log_opt = False
-# data_file = 'esr/dark_matter_data2.txt'
-name = 152
-data_file = 'XXL/' + str(name) + '.txt'
-run_name = 'WL_' + str(name)
+# comp = 4
+# try_integration = False
+# method = "Nelder-Mead"
+# log_opt = True
+# # data_file = 'esr/dark_matter_data2.txt'
+# name = 148
+# data_file = 'XXL/' + str(name) + '.txt'
+# run_name = 'WL_' + str(name) + '_katz'
 
-if rank == 0:
-    print('method:', method, ', log_opt:', log_opt, "cluster:", name, flush=True)
+# if rank == 0:
+#     print('method:', method, ', log_opt:', log_opt, "cluster:", name, flush=True)
 
-start = time.time()
-fit_galaxy(data_file, run_name, comp, try_integration=try_integration, method=method, log_opt=log_opt)
-end = time.time()
+# start = time.time()
+# fit_galaxy(data_file, run_name, comp, try_integration=try_integration, method=method, log_opt=log_opt)
+# end = time.time()
 
-if rank == 0:
-    print('Total time taken:', end - start, flush=True)
+# if rank == 0:
+#     print('Total time taken:', end - start, flush=True)
 
 
 # ------------------------------------------------------------
 # run code for one fucntion
 # ------------------------------------------------------------
 
-# method = "Nelder-Mead"
-# log_opt = False
-# name = 114
-# data_file = 'XXL/' + str(name) + '.txt'
-# run_name = 'WL_' + str(name)
+method = "Nelder-Mead"
+log_opt = False
+# name = 76
+# name = 178
+# name = 171
+# name = 127
+name = 111
+# name = 161
+data_file = 'XXL/' + str(name) + '.txt'
+run_name = 'WL_' + str(name)
 
-# # dtafile all clusters
-# # data_file = 'XXL/combined_data.txt'
-# # run_name = 'WL'
+# dtafile all clusters
+# data_file = 'XXL/combined_data.txt'
+# run_name = 'WL'
 
-# fn1 =  'pow(Abs(a0*x - pow(x,x)),a1)'
-# fn2 =  'a1/(-x + pow(Abs(a0),x))'
-# fn3 = '(a0 + a1/x)/x'
-# fn4 = 'a0*(x + 1/x)/x'
-# fn5 = 'a0*(a1*x + 1/x)'
+fn1 =  'pow(Abs(a0*x - pow(x,x)),a1)'
+fn2 =  'a1/(-x + pow(Abs(a0),x))'
+fn3 = '(a0 + a1/x)/x'
+fn4 = 'a0*(x + 1/x)/x'
+fn5 = 'a0*(a1*x + 1/x)'
 
-# fn_list = [fn1, fn2, fn3, fn4, fn5]
+fn_list = [fn1, fn2, fn3, fn4, fn5]
 
-# # fn_list = ['a0/(1 - a1) - x/(1 - a1)']
+# fn_list = ['a0/(1 - a1) - x/(1 - a1)']
 
-# # fn_list = ['x + 1/(a0 + x)']
-# # fn_list = ['pow(x, a0)']
-# # fn_list = ['(a0 + (x + a1)/x)/x']
-# # fn_list = ['x*pow(Abs(a0),(pow(x,a1))) ']
-# fn_list = ['a0/(x*pow(Abs(a1 + x),a2))']
-# if rank == 0:
-#     print('method:', method, ', log_opt:', log_opt, flush=True)
+fn_list = ['pow(Abs(a0),(pow(x,x)))']
+# fn_list = ['a0/(a1 + x)']
+# fn_list = ['1/(a1 + pow(Abs(a0),x))']
+# fn_list = ['(a0*x - x)*pow(Abs(a1),x)']
+fn_list = ['x*pow((1/Abs(a0)*x),x)/a1']
+fn_list = ['a1*pow(1/(Abs(a0)*x),x) ']
+# fn_list = ['pow(x,((x)**(-2)))']
+# fn_list = ['x*(x + 1/a1)*pow(Abs(a0),x)']
+fn_list = ['x*(a0 + x)*pow(Abs(a1),x)']
+fn_list = ['(a1 + x**2)*pow(Abs(a0),x)']
+# fn_list = ['pow((x*Abs(a0)),a1) - 1/x']
+# fn_list = ['a0*(a1 + x**(-3))']
+fn_list = ['x**2/(a0*pow(Abs(a1),x))']
+# fn_list = ['a0*pow(Abs(a1),(x**2))'] 
+fn_list = ['x/(a0*(-x + pow(Abs(a1),x)))']
+fn_list = ['a0*x**(-3)']
 
-# # Create a figure and axis for the plot
-# fig, ax = plt.subplots(figsize=(7, 5))
 
-# for fn in fn_list:
-#     start = time.time()
-#     chi2, params, algo = run_fit_single(data_file, run_name, fn, log_opt, method, ax)
-#     print(chi2, params)
-#     end = time.time()
-#     print('Total time taken:', end - start, flush=True)
-# plt.legend()
-# plt.show()
+if rank == 0:
+    print('method:', method, ', log_opt:', log_opt, flush=True)
 
-# if rank == 0:
-#     print('Total time taken:', end - start, flush=True)
+# Create a figure and axis for the plot
+fig, ax = plt.subplots(figsize=(7, 5))
+
+for fn in fn_list:
+    start = time.time()
+    chi2, params, algo = run_fit_single(data_file, run_name, fn, log_opt, method, ax)
+    print(chi2, params)
+    end = time.time()
+    print('Total time taken:', end - start, flush=True)
+plt.legend()
+plt.show()
+
+if rank == 0:
+    print('Total time taken:', end - start, flush=True)
     
 #------------------------------------------------------------
 #run pareto plot

@@ -172,11 +172,13 @@ class ExcessSurfaceDensity:
     def _esd_first_term_integrand_func(self, xs):
         """First term integrand function for ESD calculation."""
         rhos = self.density_func(xs, *self.params)
-        # jax.debug.print('rho {x}', x = rhos)
-        # jax.debug.print('xs {x}', x = xs)
+        rhos = np.atleast_1d(rhos)
+        # jax.debug.print('rhos {x}', x = rhos)
         radii_ = self.radii
         postfactor = xs**2 / atleast_kd(self.radii, xs.ndim, append_dims=False)**2
+
         postfactor = atleast_kd(postfactor, rhos.ndim)
+
         if self.radial_axis_to_broadcast is not None:
             postfactor = np.moveaxis(postfactor, self.radial_axis_to_broadcast + 1, self.density_axis)
         return 4 * rhos * postfactor, rhos
@@ -185,7 +187,11 @@ class ExcessSurfaceDensity:
         """Second term integrand function for ESD calculation."""
         thetas_ = atleast_kd(thetas, self.radii.ndim + 1)
         density_arg = self.radii[None, ...] / np.abs(np.cos(thetas_))
+        # jax.debug.print('density {x}', x = density_arg)
         rhos = self.density_func(density_arg, *self.params)
+        rhos = np.atleast_1d(rhos)
+        # jax.debug.print('rho {x}', x = rhos)
+
         radii = atleast_kd(self.radii[None, ...], rhos.ndim)
         if self.radial_axis_to_broadcast is not None:
             radii = np.moveaxis(radii, self.radial_axis_to_broadcast + 1, self.density_axis)

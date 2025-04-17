@@ -135,18 +135,18 @@ def combine_all_galaxies(dirname, aifeyn_file, names, all_fcn, comp):
             Nconv = data[:,-3]
             Niter = data[:,-2]
             time = data[:, -1]
-            print('NAME', name)
-            print('fcn', all_fcn[1565])
-            print('codelen', codelen_value[1565])
-            print('negloglike', negloglike_value[1565])
-            print('params', p[1565, :])
-            print('delta', delta[1565, :])
+            # print('NAME', name)
+            # print('fcn', all_fcn[1565])
+            # print('codelen', codelen_value[1565])
+            # print('negloglike', negloglike_value[1565])
+            # print('params', p[1565, :])
+            # print('delta', delta[1565, :])
 
-            print('fcn', all_fcn[1595])
-            print('codelen', codelen_value[1595])
-            print('negloglike', negloglike_value[1595])
-            print('params', p[1595, :])
-            print('delta', delta[1595, :])
+            # print('fcn', all_fcn[1595])
+            # print('codelen', codelen_value[1595])
+            # print('negloglike', negloglike_value[1595])
+            # print('params', p[1595, :])
+            # print('delta', delta[1595, :])
 
             aifeyn_value = np.genfromtxt(aifeyn_file) # All
             codelen_value = np.atleast_1d(codelen_value)
@@ -210,10 +210,14 @@ def combine_all_galaxies(dirname, aifeyn_file, names, all_fcn, comp):
                 print(count_zeroes[j], all_fcn[j], '\n', clusters_with_inf_per_fcn[j])
 
         # Process your data and calculate L, then save to a CSV file
-        mean_p0 = np.mean(p0, axis=1)
-        mean_p1 = np.mean(p1, axis=1)
-        std_p0 = np.std(p0, axis=1)
-        std_p1 = np.std(p1, axis=1)
+        #arregalr esto para no considerar params that are snapped to zero and also abs should be considered the same minus or plus
+        p0_nozero = np.where(p0 != 0, p0, np.nan)
+        p1_nozero = np.where(p1 != 0, p1, np.nan)
+
+        mean_p0 = np.mean(p0_nozero, axis=1)
+        mean_p1 = np.mean(p1_nozero, axis=1)
+        std_p0 = np.std(p0_nozero, axis=1)
+        std_p1 = np.std(p1_nozero, axis=1)
 
         # print('hola', len(negloglike))
 

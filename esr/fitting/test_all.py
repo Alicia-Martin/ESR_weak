@@ -163,7 +163,6 @@ def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_in
     #divide the data for the different clusters
     points_per_cluster = 9
     nclusters = len(xvar)//points_per_cluster
-    # print('nclusters:', nclusters, flush=True)
     xvar = np.array_split(xvar, nclusters)
     yvar = np.array_split(yvar, nclusters)
     yerr = np.array_split(yerr, nclusters)
@@ -173,6 +172,7 @@ def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_in
     count_lowest_per_cluster = []
 
     for i in range(nclusters):
+        # print(i)
         xvar_i = xvar[i]
         yvar_i = yvar[i]
         yerr_i = yerr[i]
@@ -235,7 +235,7 @@ def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_in
             total_loss += chi2_min
 
 
-
+    print(len(local_params_per_cluster))
         # print(i, chi2_min, count_lowest)
 
     return local_params_per_cluster, total_loss, count_lowest_per_cluster
@@ -257,12 +257,30 @@ def global_loss(global_params, chi2_fcn, xvar, yvar, yerr, signs, global_index, 
     # global_loss.best_local_count = count_lowest_per_cluster
     return total_loss 
 
-def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, comp=0, try_integration=False, log_opt=False, max_param=4, test_success=False, ignore_previous_eqns=True, method='BFGS', Nconv=400, Niter=400):
+def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, n_clusters, comp=0, try_integration=False, log_opt=False, max_param=4, test_success=False, ignore_previous_eqns=True, method='BFGS', Nconv=400, Niter=400):
 
     xvar, yvar, yerr= likelihood.xvar, likelihood.yvar, likelihood.yerr
     
-    nparam = simplifier.count_params([fcn_i], max_param)[0]
+
     params = np.zeros(max_param)
+
+    nparams = simplifier.count_params([fcn_i], max_param)[0]
+    n_fun_params = nparams
+
+    # (1.5) Get the global and local indices
+    # global_index = [0]
+    nglobal = len(global_index)
+    nlocal = nparams - nglobal
+    n_extra = 0
+
+    if likelihood.physicalize:
+        n_extra = 2
+        nlocal = nlocal + n_extra
+        nparams = nparams + n_extra
+        max_param += n_extra
+
+    # print('n_global:s', n_global, 'n_local:', n_local, 'n_extra:', n_extra, 'nparams:', nparams, flush=True)
+    # sys.exit(0)
 
     # if comp>1 and ignore_previous_eqns:
     #     previous_fns_file = likelihood.fn_dir + "/compl_"+str(comp)+"/previous_eqns_"+str(comp)+".txt"
@@ -271,9 +289,9 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, comp=0
     #     if fcn_i in previous_fns:
     #         return np.inf, params, 0, 0, False
 
-    if nparam > 0:
-        if (Nconv <= 0) or (Niter <= 0) or (Nconv > Niter):
-            raise ValueError("Nconv and/or Niter have unacceptable values")
+    # if nparam > 0:
+    #     if (Nconv <= 0) or (Niter <= 0) or (Nconv > Niter):
+    #         raise ValueError("Nconv and/or Niter have unacceptable values")
 
     fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
 
@@ -281,23 +299,41 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, comp=0
     # all_a = list(sympy.symbols(all_a, real=True))
     # eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
 
-    if nparam > 1:
-        all_a = ' '.join([f'a{i}' for i in range(nparam)])
+    # if nparam > 1:
+    #     all_a = ' '.join([f'a{i}' for i in range(nparam)])
+    #     all_a = list(sympy.symbols(all_a, real=True))
+    #     eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+    # else:
+    #     eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+
+    if n_fun_params == 0 and n_extra == 0:
+        eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+    elif n_fun_params == 0 and n_extra > 0:
+            rho0, rs = sympy.symbols("rho0 rs", real=True)
+            eq_numpy = sympy.lambdify([x, rho0, rs], eq, modules=["jax"])
+    elif n_fun_params > 1:
+        all_a = ' '.join([f'a{i}' for i in range(n_fun_params)])
         all_a = list(sympy.symbols(all_a, real=True))
+        if n_extra>0:
+            all_a += sympy.symbols("rho0 rs", real=True)
         eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
-    else:
-        eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+    elif n_fun_params == 1:
+        if n_extra>0:
+            rho0, rs = sympy.symbols("rho0 rs", real=True)
+            eq_numpy = sympy.lambdify([x, a0, rho0, rs], eq, modules=["jax"])
+        else:
+            eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
     
     #add these params to the function params later
-    Niter = 10
+    Niter = 5
     Nconv = 3
 
     # Reset chi2
     chi2_min = np.inf
 
 
-    nglobal = len(global_index)
-    nlocal = nparam - nglobal
+    # nglobal = len(global_index)
+    # nlocal = nparams - nglobal
     # print('nglobal:', nglobal, 'nparam:', nparam, flush=True)
 
     loss_template = likelihood.get_loss(eq_numpy)
@@ -306,7 +342,7 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, comp=0
     mult_arr = np.ones(max_param)
     count_lowest = 0
     inf_count = 0
-    n_clusters = len(xvar)//9
+    print('n_clusters:', n_clusters, flush=True)
 
     for j in range(Niter):
 
@@ -327,6 +363,7 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, comp=0
             # The optimized global parameters
             global_optimized = res.x
             best_local_params = state['best_local_params']
+            print('Best local params:', len(best_local_params), flush=True)
             local_count_lowest = state['best_local_count']
             # best_local_params = global_loss.best_local_params
             # local_count_lowest = global_loss.best_local_count
@@ -483,6 +520,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
             all_a = list(sympy.symbols(all_a, real=True))
             if likelihood.physicalize:
                 all_a += sympy.symbols("rho0 rs", real=True)
+                eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
             else:
                 eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
         elif nparam == 1:
@@ -520,7 +558,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                     bad_fun = False
                     break
             except Exception as e: #probably not an issue cause functions 
-                # print(e)
+                print(e)
                 bad_fun = True
         
         if bad_fun:
@@ -652,6 +690,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                 mult_arr = []
                 for signs in all_sign_combinations:
                     res_iteration = minimize_scipy(chi2_fcn, inpt, jac=True,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method=method)
+                    # print(j, res_iteration['success'], res_iteration['fun'], res_iteration['x'], flush=True)
                     choose = jnp.argmin(jnp.array([[res_iteration['fun']], [res_fun]])) #check wether it's succesful before choosing
                     # if choose ==0 and res_iteration.success:
                     if choose ==0:
@@ -745,9 +784,9 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
             chi2_i = np.nan
             params[:] = 0.
 
-    except Exception as e:
-        print('Exception:', e, flush=True)
-        return np.nan, params, 0, 0
+    # except Exception as e:
+    #     print('Exception:', e, flush=True)
+    #     return np.nan, params, 0, 0
 
     # maybe check success myself
     # success when gradient is 0 at the minimum

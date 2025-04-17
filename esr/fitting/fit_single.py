@@ -17,6 +17,7 @@ import scipy.optimize
 import matplotlib.pyplot as plt
 from esr.fitting.sympy_symbols import *
 import itertools
+from esr.esd import ExcessSurfaceDensity
 
 
 
@@ -136,27 +137,32 @@ def get_sigma_from_integral(p, Sigma, fcn_i, negloglike_all, nparams, max_fun_pa
             else:
                 return True
 
-        param = p[:nparams]
+        # param = np.append(p[:nparams], p[-2:])
+        param = np.append(p[:nparams], p[max_fun_params:])
         # print('param', param, flush=True)
         # sys.exit()
         # initial_guesses = [np.ones(nparams), np.ones(nparams)*(-1), np.log10(param)]
         # initial_guesses = [[-20]*nparams, [-10]*nparams,[0]*nparams, [10]*nparams, [20]*nparams]
         # initial_guesses = [- 20* np.log10(np.abs(param)), - 10*np.log10(np.abs(param)), - 5*np.log10(np.abs(param)), np.log(np.abs(param)), 5*np.log10(np.abs(param)), 10*np.log10(np.abs(param))]
 
-        for j in range(nparams):
+        for j in range(len(param)):
+        # for j in [2]:
                 theta = param[j]
-                print('theta', theta, flush=True)
+                # print('theta', theta, flush=True)
 
                 #try to optimise not in log scale firts
-                initial_guesses_log_space_small = [-20, -10, -5]
-                initial_guesses_normal_space = np.sort([0, np.abs(theta)])
-                initial_guesses_log_space_large = [1, 5, 10]
+                # initial_guesses_log_space_small = [-20, -10, -5]
+                # initial_guesses_normal_space = np.sort([0, np.abs(theta)])
+                # initial_guesses_log_space_large = [1, 5, 10]
 
-                initial_guesses = [(val, True) for val in initial_guesses_log_space_small] + \
-                  [(val, False) for val in initial_guesses_normal_space] + \
-                  [(val, True) for val in initial_guesses_log_space_large]
+                # initial_guesses = [(val, True) for val in initial_guesses_log_space_small] + \
+                #   [(val, False) for val in initial_guesses_normal_space] + \
+                #   [(val, True) for val in initial_guesses_log_space_large]
 
-                initial_guesses.sort(key=lambda x: 10**x[0] if x[1] else x[0])
+                # initial_guesses.sort(key=lambda x: 10**x[0] if x[1] else x[0])
+
+                initial_guesses = [-20, -10, -5,-1, 0, 0.5, 1, np.log10(np.abs(theta)), 2, 5]
+                initial_guesses = [(val, True) for val in initial_guesses]
 
                 # print('initial_guesses', initial_guesses, flush=True)
                 # sys.exit()
@@ -166,16 +172,25 @@ def get_sigma_from_integral(p, Sigma, fcn_i, negloglike_all, nparams, max_fun_pa
                 # print('initial_guesses', initial_guesses, flush=True)
 
                 #Plot likelihood
-                # Delta_plot = 0.1
-                # x_range = np.linspace(theta - Delta_plot, theta + Delta_plot, 10**2)
+                # Delta_plot = 1e-8
+                # x_range = np.linspace(theta - Delta_plot, theta + Delta_plot, 10**3)
+                # # x_range = np.append(x_range, theta)
                 # params_range = np.tile(param, (len(x_range), 1))
                 # params_range[:, j] = x_range
 
                 # nll = []
                 # for params in params_range:
+                #     # print('params', params, flush=True)
                 #     negloglike = fop(params)
-                #     nll = np.append(nll, negloglike)        
-                # plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
+                #     # print('negloglike', negloglike, flush=True)
+                #     nll = np.append(nll, negloglike)  
+                # # print('Max', np.max(nll), flush=True)     
+                # # print(np.exp(-np.max(nll) + jnp.min(nll)))
+                # # print('nll', nll, flush=True)
+                # # print(np.exp(-nll + jnp.min(nll[np.isnan(nll) == False])))
+                # # print(x_range)
+                # plt.plot(x_range, np.exp(-nll + jnp.min(nll[np.isnan(nll) == False])))
+                # # plt.plot(x_range, np.exp(-nll))
                 # plt.yscale('log')
                 # # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
                 # plt.show()
@@ -185,25 +200,37 @@ def get_sigma_from_integral(p, Sigma, fcn_i, negloglike_all, nparams, max_fun_pa
                 chi2_fcn = wrap_loss(loss_template)
 
                 for factor in [-1, 1]:
+                    # print('factor', factor, flush=True)
                     for initial_guess, is_log in initial_guesses:  
-                        print('initial_guess', initial_guess, flush=True)      
+                        success = False
+                        # print('initial_guess', initial_guess, flush=True)      
 
                         log = is_log                    
                         res = scipy.optimize.minimize(chi2_fcn, initial_guess, args=(param, j, factor, log), method='Nelder-Mead', tol=1e-8)
-                        print('res', res, flush=True)
+                        # print('res', res, flush=True)
                         if test_success(res)== True:
                             if factor == -1:
                                 boundary_left = get_boundary(res, log)
-                                print('boundary_left', boundary_left, flush=True)
+                                # print('boundary_left', boundary_left, flush=True)
                             else:
                                 boundary_right = get_boundary(res, log)
-                                print('boundary_right', boundary_right, flush=True)
+                                # print('boundary_right', boundary_right, flush=True)
+                            success = True
                             break
+                        # else:
+                        #     continue
+                    if not success:
+                        break
 
-                    if test_success(res)== False:
-                        print("Couldn't find integral limits", factor, fcn_i, theta, flush=True)
-                        return np.array([np.inf] * nparams)
+                    # if test_success(res)== False:
+                    #     print("Couldn't find integral limits", factor, fcn_i, theta, flush=True)
+                        
+                        # return np.array([np.inf] * nparams)
 
+                if not success:
+                    # print("Couldn't find integral limits", fcn_i, theta, flush=True)
+                    Sigma[j] = np.inf
+                    continue
 
                 #do integral
                 boundary = np.max([boundary_left, boundary_right])
@@ -216,7 +243,7 @@ def get_sigma_from_integral(p, Sigma, fcn_i, negloglike_all, nparams, max_fun_pa
                 param68 = a_range[arg_min + 1]
                 # print(param68)
                 sigma = np.abs(theta - param68)
-                print('sigma', sigma, flush=True)
+                # print('sigma', sigma, flush=True)
                 # print('delta', delta, flush=True)
                 Sigma[j] = sigma
         # print(Sigma)
@@ -230,8 +257,8 @@ def codelength(params, Sigma, nparams):
         # print('Delta', Delta)
         # print('params', params)
         Delta[Delta == np.inf] = params[Delta == np.inf]
-    print('Delta aqui', Delta)
-    print('params', params)
+    # print('Delta aqui', Delta)
+    # print('params', params)
     codelen = k*math.log(2.) + np.sum(np.log(abs(np.array(params))/Delta))
     return codelen
 
@@ -250,10 +277,11 @@ def get_codelen(likelihood, params, nparams, max_param, fstr, eq, negloglike):
                     return chi2_fcn([x], xvar, yvar, yerr)
             return fop
         fop = get_fop(chi2_fcn, nparams)
-        print('AQUI', fop(params))
+        # print('AQUI', fop(params))
         Sigma = get_sigma_from_integral(params, np.zeros(nparams), fstr, negloglike, nparams, max_param, get_fop(chi2_fcn, nparams), number_points=10**3)
         # print('Sigma', Sigma)
         Delta = np.sqrt(12.)*Sigma
+        # print('Delta', Delta)
         codelen = codelength(params, Sigma, nparams)
         # print('codelen', codelen)
         return codelen, Delta
@@ -271,27 +299,31 @@ def snap_params(negloglike_orig, params_orig,  Delta_orig, Nsteps, nparams, fop)
     ptrue = np.copy(params_orig)
     Delta = np.copy(Delta_orig)
 
-
     try:
         p[Nsteps<1] = 0. 
     except (IndexError, TypeError):
         p[:]=0.
 
 
-    #first try setting all parameters to zero      
+    #first try setting all parameters to zero  
+    # print('Nsteps', Nsteps)
+    # print('p', p)    
     negloglike = fop(p)
                 
     if np.isfinite(negloglike):
         mask = Nsteps<1
+        # print('MASK', mask)
         params = p
         params[mask] = 0
         Delta[mask] = 0
+        mask = np.logical_not(mask)
 
         # params  =params[mask]
         # Delta = Delta[mask]
-
+        # print('AQUI')
         # print('params 1', params)
         # print('Delta', Delta)
+        # print('maks here', mask)
 
     else:
         # Let's see if setting any of the parameters to zero is ok
@@ -309,30 +341,32 @@ def snap_params(negloglike_orig, params_orig,  Delta_orig, Nsteps, nparams, fop)
                     kept_mask = np.ones(len(p), dtype=bool)  # Keep all initially
                     kept_mask[list(idx)] = False # Exclude params set to zero
                     #mask is the oppsoite to kept_mask
-                    mask =  ~kept_mask
+                    mask =  kept_mask
+                    # mask = np.logical_not(kept_mask)
                     Delta[Nsteps<1] = abs(p[Nsteps<1]) # the rest of the params with Nsteps<1 are set to the absolute value of the parameter
                     # params = p[kept_mask]
                     params = p
-                    params[kept_mask] = 0
+                    # print('no entiendo', params)
+                    # params[kept_mask] = 0
 
-                    print('params 2', params)
+                    # print('params 2', params)
                     break
     
-        if np.isfinite(negloglike):
-            print('params 2', params)
-            print('Delta', Delta)
+        # if np.isfinite(negloglike):
+        #     print('params 2', params)
+        #     print('Delta', Delta)
             # params = p[kept_mask]
             # Delta = Delta[kept_mask]
         # elif not np.isfinite(negloglike_all[i]) and not np.isnan(negloglike_all[i]): # infinite nll
-        elif not np.isfinite(negloglike):
+        if not np.isfinite(negloglike):
             params = ptrue
             Delta[Nsteps<1] = abs(ptrue[Nsteps<1])
             negloglike = negloglike_orig
             mask = np.ones(len(params), dtype=bool)
 
-        print('params', params)
-        print('Delta', Delta)
-        print('negloglike', negloglike)
+        # print('params', params)
+        # print('Delta', Delta)
+        # print('negloglike', negloglike)
     
     return negloglike, params, Delta, mask
 
@@ -378,7 +412,7 @@ def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5,
             `return_params` is true
     
     """
-    
+    # print('likelihood', likelihood.physicalize)
     # (1) Convert the string to a sympy function
     s = generator.labels_to_shape(labels, basis_functions)
     success, _, tree = generator.check_tree(s)
@@ -392,39 +426,132 @@ def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5,
     fstr = fstr[0]
     fsym = fsym[fstr]
     nparams = simplifier.count_params([fstr], max_param)[0]
-    print(fstr)
+    # print(fstr)
     # (2) Fit this function to the data
     Niter = 600
-    Nconv = 20
+    Nconv = 100
     # method = 'Nelder-Mead'
-    print(method)
-    print('Niter', Niter)
-    # chi2, params, count_lowest, j, success = optimise_fun(fstr,
-    #                         likelihood,
-    #                         tmax,
-    #                         pmin,
-    #                         pmax,
-    #                         try_integration=try_integration,
-    #                         max_param=max_param,
-    #                         Niter_params=[Niter],
-    #                         Nconv_params=[Nconv],
-    #                         Niter=Niter,
-    #                         Nconv=Nconv,
-    #                         log_opt=log_opt,
-    #                         method=method)
-
-    chi2 = 2.3831654
-    params = jnp.array([67.345944,   -1.7631181,  -1.87571339])
-    j = 0
-    count_lowest = 0
+    # print(method)
+    # print('Niter', Niter)
+    chi2, params, count_lowest, j, success = optimise_fun(fstr,
+                            likelihood,
+                            tmax,
+                            pmin,
+                            pmax,
+                            try_integration=try_integration,
+                            max_param=max_param,
+                            Niter_params=[Niter],
+                            Nconv_params=[Nconv],
+                            Niter=Niter,
+                            Nconv=Nconv,
+                            log_opt=log_opt,
+                            method=method)
     
-    print('best:', chi2, params, count_lowest, j, success)
-    # print(chi2.dtype)
+    # chi2 = 3.9379377
+    # params = jnp.array([32.466593,  -0.990, 3.047113, 15.639383] )
+    
+    # chi2 = 1.870920300483703
+    # params = jnp.array([0.78668967, -6.74484827, 1.81181387, 1.24028772])
 
-    # sys.exit()
+
+    # chi2 = 5.0408621 #2
+    # chi2 =  5.0422688 #1
+    # # params = jnp.array([-5.4265077, 7.8501984,  1.9621697] )
+    # # params = jnp.array([8.1709930e-04, 2.7182804e+01])
+    # # params = jnp.array([8.1696146e-04, 2.7182815e+01])
+
+    # params = jnp.array([5.7807799e+05, 2.3337726e-03]) #1
+    # params = jnp.array([5.6977181e+05, 2.3334645e-03]) #2
+    # # -2.7182804e+01  8.1709930e-04
+    # j = 0
+    # count_lowest = 0
+
+    if np.isnan(chi2) or np.isinf(chi2):
+        print('chi2 is nan or inf')
+        return chi2, np.nan, params, params, np.nan, np.nan
+
 
     # DL = 0
     # Delta  = params
+    print('best:', chi2, params, count_lowest, j, success)
+    
+    fcn, eq = likelihood.run_sympify(fstr,
+                                        tmax=tmax,
+                                        try_integration=try_integration)
+    
+    # print(eq)
+    
+    if likelihood.physicalize:
+        n_fun_params = nparams
+        nparams  = n_fun_params + 2
+        n_extra = 2
+    else:
+        n_fun_params = nparams
+        n_extra = 0
+    # print(eq)
+    # sys.exit()
+    # print('nparams', n_extra)
+    if n_fun_params == 0 and n_extra == 0:
+        eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+    elif n_fun_params == 0 and n_extra > 0:
+            rho0, rs = sympy.symbols("rho0 rs", real=True)
+            eq_numpy = sympy.lambdify([x, rho0, rs], eq, modules=["jax"])
+    elif n_fun_params > 1:
+        all_a = ' '.join([f'a{i}' for i in range(n_fun_params)])
+        all_a = list(sympy.symbols(all_a, real=True))
+        if n_extra>0:
+            all_a += sympy.symbols("rho0 rs", real=True)
+        eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+    elif n_fun_params == 1:
+        if n_extra>0:
+            # print('HERE')
+            rho0, rs = sympy.symbols("rho0 rs", real=True)
+            eq_numpy = sympy.lambdify([x, a0, rho0, rs], eq, modules=["jax"])
+        else:
+            eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+
+    grad_density = jax.grad(eq_numpy, argnums=0)(30., *params)
+    # print('grad_density', grad_density)
+    # print('value', eq_numpy(30., *params))
+
+    # return chi2, chi2, params, params
+
+    # print(eq_numpy(1, *params))
+
+    # eds = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=params)
+    # # print(eds)
+    # params1 = np.array([100, 7.93551118e+01, 6.48554867e-01])
+    # eds1 = ExcessSurfaceDensity.calculate(likelihood.xvar, eq_numpy, params=params1)
+    # print(eds1)
+            
+    def get_fop(chi2_fcn):
+        def fop(x):
+            print(chi2_fcn(x, likelihood.xvar, likelihood.yvar, likelihood.yerr))
+            return chi2_fcn(x, likelihood.xvar, likelihood.yvar, likelihood.yerr)[0]
+        return fop
+
+    loss_template = likelihood.get_loss(eq_numpy)
+    chi2_fcn = likelihood.get_wrapped_like(loss_template) #change this
+    fop = get_fop(chi2_fcn)
+
+    # print(fop([0.0000000e+00, -2.6065743e+00]))
+    # print('fop', fop(np.zeros(len(params))))
+    # print('fop a1= 0', fop([params[0], 0.0]))
+    # print('fop a0= 0', fop([0.0, params[1]]))
+    # print('LASTres', fop([0., 0., 5.24242883, 7.18230838]))
+    # print('LASTres', fop([0., 0., 0., 1.]))
+    # print('fop', fop([0.,0.]))
+    # print('fop 2', fop([0.,-2.5]))
+    # print('eq', eq_numpy(1e-6, 375.5,0))
+    # print('eq', eq_numpy(1e-6, 0.,0.))
+    # sys.exit()
+    # 
+
+    # params2 = np.array([0.00309482, 948.87853, 3.6805378])
+    # params2 = np.array([ 7.0770481e+00, -3.7901390e-06, 11.479928, 0.26384255])
+    # print('other params', fop(params2))
+    
+    # sys.exit()
     
 
                             
@@ -442,42 +569,87 @@ def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5,
         params_convert, negloglike_convert, deriv, codelen = convert_params(
             fcn, eq, p, likelihood, chi2, max_param=max_param)
         
-        print('params_convert', params_convert, negloglike_convert, codelen)
+        # print('params_convert', params_convert, negloglike_convert, codelen, deriv)
 
         #if convert params fails (there is a cutoff or other porblems), calculate codelen from integral
+        # codelen = np.nan
         if np.isnan(codelen) or np.isinf(codelen):
             negloglike = chi2
 
-            if nparams == 0:
-                eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
-            elif nparams == 1:
-                eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
-            else:
-                all_a = ' '.join([f'a{i}' for i in range(nparams)])
-                all_a = list(sympy.symbols(all_a, real=True))
-                eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+            # if nparams == 0:
+            #     eq_numpy = sympy.lambdify([x], eq, modules=["jax"])
+            # elif nparams == 1:
+            #     eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
+            # else:
+            #     all_a = ' '.join([f'a{i}' for i in range(nparams)])
+            #     all_a = list(sympy.symbols(all_a, real=True))
+            #     eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
+
             # print('params here', params)
             codelen, Delta = get_codelen(likelihood, params, nparams, max_param, fstr, eq_numpy, negloglike)
-            print('codelen', codelen, Delta)
+            # print('codelen', codelen, Delta)
+            # sys.exit()
+
+            # print(chi2.dtype)
+
+
             #snap params to 0
             def get_fop(chi2_fcn):
                 def fop(x):
                     return chi2_fcn(x, likelihood.xvar, likelihood.yvar, likelihood.yerr)[0]
                 return fop
             Nsteps = abs(np.array(params))/Delta
+            #if extra params, don't condiser them for snapping
+            if n_extra > 0:
+                N_steps_extra = Nsteps[-n_extra:]
+                Delta_extra = Delta[-n_extra:]
+                Delta_extra[N_steps_extra <1] = abs(params[-n_extra:][N_steps_extra <1])
+                Delta[-n_extra:] = Delta_extra
+                Nsteps[-2:] = 1
             if np.sum(Nsteps<1)>0:
                 loss_template = likelihood.get_loss(eq_numpy)
                 chi2_fcn = likelihood.get_wrapped_like(loss_template) #change this
                 fop = get_fop(chi2_fcn)
                 chi2, params, Delta, mask = snap_params(chi2, params,  Delta, Nsteps, nparams, fop)
-                print('params snapped', params, Delta, chi2)
-                params_codelen = params[~mask]
-                Delta_codelen = Delta[~mask]
+                # print('params snapped', params, Delta, chi2)
+                # print('mask', mask) 
+                params_codelen = params[mask]
+                Delta_codelen = Delta[mask]
                 Sigma = Delta_codelen/np.sqrt(12.)
                 codelen = codelength(params_codelen, Sigma, len(params_codelen))
 
+            # print('AQUI', eq_numpy(x, *params))
+            if np.all(eq_numpy(likelihood.xvar, *params) == 0):
+                params = np.zeros(max_param)
+                fish = np.zeros(max_param)
+                Delta = np.zeros(max_param)
+                codelen = 0
+
+                # if not np.allclose(params, 0):
+                #     eq_values = eq_numpy(likelihood.xvar, *params)
+                #     if np.count_nonzero(eq_values) == 0:
+                #         print('HERE')
+                #     #if np.all(eq_numpy(xvar, *params_no_zeroes) == 0) and params_no_zeroes != np.zeros(len(params_no_zeroes)):
+                #         fop = get_fop(chi2_fcn, total_param=nparams)
+                #         all_zeroes = np.zeros(len(params))
+                #         if fop(all_zeroes) == negloglike:
+                #             #print(fcn_i)
+                #             #print(params_no_zeroes)
+                #             p = np.zeros(max_param)
+                #             fish = np.zeros(max_param)
+                #             Delta = np.zeros(max_param)
+                #             codelen = 0
+
+
 
         else:
+            # print('AQUI', eq_numpy(x, *params))
+            if np.all(eq_numpy(likelihood.xvar, *params) == 0):
+                params = np.zeros(max_param)
+                fish = np.zeros(max_param)
+                Delta = np.zeros(max_param)
+                codelen = 0
+
             params = params_convert
             chi2 = negloglike_convert
             fisher_diag = get_fisher_diag_from_deriv(deriv, nparams, max_param=max_param)
@@ -493,7 +665,7 @@ def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5,
         # (4) Get the functional complexity
         param_list = ['a%i'%j for j in range(max_param)]
         aifeyn = generator.aifeyn_complexity(labels, param_list)
-        print('aifeyn', aifeyn)
+        # print('aifeyn', aifeyn)
         # sys.exit()
         if verbose:
             print('Function:', aifeyn)
@@ -504,11 +676,11 @@ def single_function(labels, basis_functions, likelihood, method, pmin=0, pmax=5,
             print('\nDescription length:', DL)
             
     if return_params:
-        return chi2, DL, params, Delta
+        return chi2, DL, params, Delta, codelen, aifeyn
     
     print('best:', chi2, params,count_lowest, j, success)
 
-    return chi2, DL
+    return chi2, DL, codelen, aifeyn
 
     # return chi2, params
     
@@ -617,9 +789,9 @@ def fit_from_string(fun, basis_functions, likelihood, pmin=0, pmax=5, tmax=5,
 
     
     if return_params:
-        return res[0], res[1], labels, res[2], res[3]
+        return res[0], res[1], labels, res[2], res[3], res[4], res[5]
     
-    return res[0], res[1], labels
+    return res[0], res[1], labels, res[4], res[5]
     
     
 def tree_to_aifeyn(labels, basis_functions, verbose=True):
