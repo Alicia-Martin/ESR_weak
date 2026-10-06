@@ -17,6 +17,7 @@ import esr.generation.utils as utils
 from esr.generation.custom_printer import ESRPrinter
 from esr.fitting.sympy_symbols import *
 
+
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
@@ -1209,7 +1210,7 @@ def convert_params(p_meas, fish_meas, inv_subs, n=4):
     all_a = sympy.symbols(" ".join(param_list), real=True)
     if max_param == 1:
         all_a = [all_a]
-        
+
     p = sympy.Array(sympy.symbols(" ".join(param_list), real=True))
     for i in range(len(inv_subs)):
         p = p.subs(inv_subs[i], simultaneous=True)
@@ -1217,7 +1218,6 @@ def convert_params(p_meas, fish_meas, inv_subs, n=4):
     jac = sympy.Matrix(p).jacobian(all_a)
         
     s = {all_a[i]:p_meas[i] for i in range(max_param)}
-    
     p_lam = sympy.lambdify(all_a[:len(p_meas)], p)
     p_new = p_lam(*p_meas)
     
@@ -1228,8 +1228,88 @@ def convert_params(p_meas, fish_meas, inv_subs, n=4):
     fish_new = np.dot(jinv.T, np.dot(fish, jinv))
     
     diag_fish = np.array([fish_new[i,i] for i in range(fish_new.shape[0])])
+    # print(p_new, diag_fish)
 
     return p_new, diag_fish
+
+def inverse_convert_params(p_variant, delta_variant, subs):
+    p_variant = np.array(p_variant)
+    
+    # Create symbolic variables for the unique function parameters
+    max_param = len(p_variant)
+    param_list = ['a%i' % i for i in range(max_param)]
+    unique_params = sympy.symbols(" ".join(param_list), real=True)
+    
+
+    variant_params = sympy.Array(unique_params)
+
+  # Check for NaNs in the list of substitutions
+    if isinstance(subs, list):
+        # Check if any element is a NaN
+        if any(isinstance(sub, float) and np.isnan(sub) for sub in subs):
+            return np.array(0 * max_param), np.array(0 * max_param)
+        
+        # Check within dictionaries for NaNs
+        if any(isinstance(sub, dict) for sub in subs):
+            for sub in subs:
+                if isinstance(sub, dict):
+                    for val in sub.values():
+                        if isinstance(val, float) and np.isnan(val):
+                            return np.array(0 * max_param), np.array(0 * max_param)
+
+    reverse_subs = [{v: k for k, v in d.items()} for d in subs]
+    # print('reverse_subs', reverse_subs)
+
+    # Apply the reversed substitutions
+    for sub in reverse_subs:
+        # print('sub', sub)
+        variant_params = variant_params.subs(sub, simultaneous=True)
+    #     print('variant_params', variant_params)
+
+    # combined_subs = {}
+    # for sub in reverse_subs:
+    #     combined_subs.update(sub)
+    
+    # # print('Combined substitutions:', combined_subs)
+
+    # # Apply the combined substitutions simultaneously
+    # variant_params = [param.subs(combined_subs, simultaneous=True) for param in variant_params]
+    # print('variant_params', variant_params)
+    # Convert symbolic expressions to lambda functions
+    p_lam = sympy.lambdify(unique_params, variant_params)
+    
+    # Evaluate the lambda function with the actual parameters
+    p_unique = p_lam(*p_variant)
+
+    param_list = ['a%i'%i for i in range(max_param)]
+    all_a = sympy.symbols(" ".join(param_list), real=True)
+    if max_param == 1:
+        all_a = [all_a]
+
+    p = sympy.Array(sympy.symbols(" ".join(param_list), real=True))
+    for i in range(len(reverse_subs)):
+        p = p.subs(reverse_subs[i], simultaneous=True)
+        
+    jac = sympy.Matrix(p).jacobian(all_a)
+    # p_lam = sympy.lambdify(all_a[:len(p_variant)], p)
+    
+    j_lam = sympy.lambdify(all_a[:len(p_variant)], jac)
+    jac = j_lam(*p_unique)
+
+    # # Calculate the Jacobian of the transformation (dp_unique / dp_actual)
+    # jacobian = sympy.Matrix(unique_params).jacobian(variant_params)
+    # j_lam = sympy.lambdify(unique_params, jacobian)
+    
+    # # Evaluate the Jacobian at the actual parameter values
+    # jac = j_lam(*p_unique)
+
+
+
+    delta_unique = np.sqrt(np.diag(np.dot(jac, np.dot(np.diag(delta_variant**2), jac.T)))) #I think this expression is correct
+    # print(delta_actual, delta_unique)
+    # print(p_variant, delta_variant)
+    # print(p_unique, delta_unique)
+    return p_unique, delta_unique
 
 
 def check_results(dirname, compl, tmax=10):

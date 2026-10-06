@@ -17,13 +17,14 @@ from scipy.integrate import quad
 from scipy.optimize import fsolve
 
 import jax.numpy as jnp
+from jax.scipy.linalg import solve_triangular
 
 from quadax import quadgk
 
 
 
 class WLLikelihood(Likelihood):
-    def __init__(self, data_file, run_name, data_dir=None, fn_set = 'core_maths', keep_nans = False, physicalize = False, use_clipping=False):
+    def __init__(self, data_file, cov_file, run_name, data_dir=None, fn_set = 'core_maths', keep_nans = False, physicalize = False, use_clipping=False):
         """Likelihood class used to fit a function directly using a Gaussian likelihood
  
         # """
@@ -40,7 +41,6 @@ class WLLikelihood(Likelihood):
 
         #Load data
         # Read the file
-        print('data_file', data_file)
         with open(data_file, 'r') as file:
             lines = file.readlines()
 
@@ -56,9 +56,6 @@ class WLLikelihood(Likelihood):
             self.xvar = jnp.array(list(map(float, lines[0].split())))[no_nans]
             self.yerr = jnp.array(list(map(float, lines[2].split())))[no_nans]
 
-        # self.yvar = self.yvar / 100
-        # self.yerr = self.yerr / 100
-
         # print(data_file)
         # print('xvar', len(self.xvar)/9)
         # sys.exit()
@@ -67,6 +64,11 @@ class WLLikelihood(Likelihood):
             
         self.physicalize = physicalize
         self.use_clipping = use_clipping
+
+        cov_matrix = np.load(cov_file)
+        self.cov_matrix = jnp.array(cov_matrix)
+        self.L_factor = jnp.linalg.cholesky(self.cov_matrix)
+
 
         super().__init__(data_file, data_file, run_name, data_dir=data_dir, fn_set = fn_set)
         self.ylabel = r'$y$'    # for plotting
@@ -201,7 +203,6 @@ class WLLikelihood(Likelihood):
 
         # print(eq_numpy(0.5682318, 10.65178197, 18.75110151))
         # a = [-2, 1]
-        
         eds = ExcessSurfaceDensity.calculate(xvar, eq_numpy, params=a, use_cliping=self.use_clipping)
         # print(eds)
         # sys.exit()
@@ -233,7 +234,7 @@ class WLLikelihood(Likelihood):
 
             return combined_params
                 
-        def f_loss(a, xvar, yvar, yerr, global_params=None, global_index=None):
+        def f_loss(a, xvar, yvar, cov, global_params=None, global_index=None):
 
             if global_params is not None:
                 a = combined_params(a, global_params, global_index)
@@ -246,15 +247,25 @@ class WLLikelihood(Likelihood):
             # jax.debug.print('decrease {x} {decrease}', x = a, decrease=decrease)
             # jax.debug.print('a {negloglike}', negloglike=a)
             ypred = self.get_pred(a, xvar, eq_numpy)
-            # jax.debug.print('ypred {ypred}, yvar {yvar}, yerr {yerr}', ypred=ypred, yvar=yvar, yerr=yerr)
+            # jax.debug.print('ypred {ypred}, yvar {yvar}', ypred=ypred, yvar=yvar)
             #check that the density is positive
 
 
-            def neg_log_gaussian(x, mean, std):
-                return (x - mean)**2/(2*std**2)
+            # def neg_log_gaussian(x, mean, std):
+            #     return (x - mean)**2/(2*std**2)
 
-            nll = neg_log_gaussian(ypred, yvar, yerr)
-            nll = jnp.sum(nll)
+            residuals = ypred - yvar
+            # jax.debug.print('residuals {residuals}', residuals=residuals)
+            # chi2 = residuals.T @ jnp.linalg.solve(self.cov_matrix, residuals)
+            y = solve_triangular(self.L_factor, residuals, lower=True)
+            # y = solve_triangular(cov, residuals, lower=True)
+            chi2 = jnp.sum(y**2)
+            # jax.debug.print('chi2 {chi2}', chi2=chi2)
+            nll = 0.5 * chi2
+
+
+            # nll = neg_log_gaussian(ypred, yvar, yerr)
+            # nll = jnp.sum(nll)
 
             # jax.debug.print('negloglike {negloglike}', negloglike=nll)
 
@@ -268,8 +279,8 @@ class WLLikelihood(Likelihood):
             return jax.hessian(f_loss)
         
         elif value == 'evaluate':
-            return jax.jit(f_loss)
-
+            return f_loss
+        
         elif value == 'grad':
             return jax.grad(f_loss)
 

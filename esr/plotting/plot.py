@@ -2,6 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
+import re
 
 def pareto_plot(dirname, savename, do_DL=True, do_logL=True):
     """
@@ -19,8 +20,11 @@ def pareto_plot(dirname, savename, do_DL=True, do_logL=True):
 
     all_f = os.listdir(dirname)
     all_f = [f for f in all_f if f.startswith('final_')]
-    all_f.sort()
-    print(all_f)
+    #file 10 is showing up second, how to fix this?
+    # all_f.sort()
+    all_f.sort(key=lambda f: int(re.search(r'\d+', f).group()))
+
+    # print(all_f)
     all_comp = [int(f[len('final_'):-len('.dat')]) for f in all_f]
     all_logL = np.empty(len(all_comp))
     all_DL = np.empty(len(all_comp))
@@ -32,11 +36,19 @@ def pareto_plot(dirname, savename, do_DL=True, do_logL=True):
             reader = csv.reader(f, delimiter=';')
             data = [row for row in reader]
             data = np.array([d[2:7] for d in data], dtype=float)
+            # print(data)
             
         # Get min DL
         try:
+            min_index = np.nanargmin(data[:, 0])  # Get the index of the minimum value
+            print(data[min_index, 2])
             all_DL[i] = np.nanmin(data[:,0])
             all_logL[i] = np.nanmin(data[:,2])
+            print(all_DL[i], all_logL[i])
+
+            min_index = np.nanargmin(data[:, 2])  # Get the index of the minimum value
+            print(data[min_index, 0])
+
         except:
             all_DL[i] = np.nan
             all_logL[i] = np.nan
@@ -92,7 +104,7 @@ def pareto_plot(dirname, savename, do_DL=True, do_logL=True):
     ax1.set_xlabel(r'Complexity')
     
     fig.tight_layout()
-    fig.savefig(dirname + '/' + savename, bbox_inches='tight')
+    fig.savefig(dirname + '/' + savename, bbox_inches='tight', dpi= 300)
     print(dirname + '/' + savename)
 #    fig.clf()
 #    plt.close(fig)

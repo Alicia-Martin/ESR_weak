@@ -1,0 +1,67 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the paper below and ESR (Bartlett, Desmond & Ferreira 2023)."
+title: "ESR_weak: Exhaustive Symbolic Regression of dark-matter halo profiles from weak lensing"
+authors:
+  - family-names: Martín
+    given-names: Alicia
+    affiliation: "Department of Physics, University of Oxford"
+repository-code: "https://github.com/Alicia-Martin/ESR_weak"
+license: MIT
+version: 1.0.0
+date-released: 2026-10-06
+keywords:
+  - weak lensing
+  - dark matter
+  - symbolic regression
+  - galaxy clusters
+preferred-citation:
+  type: article
+  title: "Symbolically regressing dark matter halo profiles using weak lensing"
+  authors:
+    - family-names: Martín
+      given-names: Alicia
+    - family-names: Yasin
+      given-names: Tariq
+    - family-names: Bartlett
+      given-names: Deaglan J.
+    - family-names: Desmond
+      given-names: Harry
+    - family-names: Ferreira
+      given-names: Pedro G.
+  journal: "Monthly Notices of the Royal Astronomical Society"
+  year: 2026
+  doi: "10.1093/mnras/stag1394"
+  identifiers:
+    - type: other
+      value: "arXiv:2601.05203"
+references:
+  - type: article
+    title: "Constraining dark matter halo profiles with symbolic regression"
+    authors:
+      - family-names: Martín
+        given-names: Alicia
+      - family-names: Yasin
+        given-names: Tariq
+      - family-names: Bartlett
+        given-names: Deaglan J.
+      - family-names: Desmond
+        given-names: Harry
+      - family-names: Ferreira
+        given-names: Pedro G.
+    journal: "Philosophical Transactions of the Royal Society A"
+    year: 2026
+    volume: 384
+    issue: 2317
+    doi: "10.1098/rsta.2025.0090"
+  - type: article
+    title: "Exhaustive Symbolic Regression"
+    authors:
+      - family-names: Bartlett
+        given-names: Deaglan J.
+      - family-names: Desmond
+        given-names: Harry
+      - family-names: Ferreira
+        given-names: Pedro G.
+    journal: "IEEE Transactions on Evolutionary Computation"
+    year: 2023
+    doi: "10.1109/TEVC.2023.3280250"

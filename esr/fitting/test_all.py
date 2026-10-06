@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 from esr.fitting.sympy_symbols import *
 import esr.generation.simplifier as simplifier
-from esr.esd import ExcessSurfaceDensity
+# from esr.esd_2 import ExcessSurfaceDensity
 #import nlopt
 
 
@@ -58,8 +58,11 @@ def chi2_fcn(x, likelihood, eq_numpy, integrated, signs):
 
 
 def initial_guess(nparam, pmin, pmax, likelihood, lhs = False):
-        pmin = -10
-        pmax = 10
+        # print(pmin, pmax)
+        # pmin = -10
+        # pmax = 10
+        # pmin = -10
+        # pmax = 10
         def get_lhs_sample(ndim, bounds):
         # Create a LatinHypercube sampler object
             sampler = qmc.LatinHypercube(d=ndim)
@@ -86,11 +89,6 @@ def initial_guess(nparam, pmin, pmax, likelihood, lhs = False):
             return inpt
 
         inpt = generate_inpt(nparam, pmin, pmax, lhs = lhs)
-
-        if likelihood.physicalize:
-            #add guess for rho0 and rs
-            inpt = np.append(inpt, np.random.uniform(0,pmax))
-            inpt = np.append(inpt, np.random.uniform(0,pmax))
 
         return inpt
     
@@ -153,16 +151,16 @@ def combine_params(global_params, local_params, global_index):
     params = np.append(global_params, local_params)
     return params 
 
-def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood):
+def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood, nclusters):
     #need to add more than one iteration
-    Niter = 10
+    Niter = 20
     Nconv = 5
     pmin = -10
     pmax = 10
 
     #divide the data for the different clusters
-    points_per_cluster = 9
-    nclusters = len(xvar)//points_per_cluster
+    # points_per_cluster = 10
+    # nclusters = len(xvar)//points_per_cluster
     xvar = np.array_split(xvar, nclusters)
     yvar = np.array_split(yvar, nclusters)
     yerr = np.array_split(yerr, nclusters)
@@ -219,7 +217,7 @@ def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_in
             # Converged the required number of times, so a success
             if count_lowest==Nconv:
                 break
-
+        # print(i, chi2_min)
         if not np.isfinite(chi2_min):
             count_lowest_per_cluster = np.zeros(nclusters)
             local_params_per_cluster = np.zeros(nclusters*nlocal)
@@ -235,14 +233,14 @@ def local_optimisation(inpt_global, chi2_fcn, xvar, yvar, yerr, signs, global_in
             total_loss += chi2_min
 
 
-    print(len(local_params_per_cluster))
+    #print(len(local_params_per_cluster))
         # print(i, chi2_min, count_lowest)
 
     return local_params_per_cluster, total_loss, count_lowest_per_cluster
 
-def global_loss(global_params, chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood, state):
+def global_loss(global_params, chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood, state, nclusters):
     # print('HERE')
-    local_params_per_cluster, total_loss, count_lowest_per_cluster = local_optimisation(global_params, chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood)
+    local_params_per_cluster, total_loss, count_lowest_per_cluster = local_optimisation(global_params, chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood, nclusters)
     
     if total_loss < state['best_total_loss']:
         state['best_total_loss'] = total_loss
@@ -266,21 +264,21 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, n_clus
 
     nparams = simplifier.count_params([fcn_i], max_param)[0]
     n_fun_params = nparams
+    
+    if likelihood.physicalize:
+        n_extra = 2
+        nparams = nparams + n_extra
+        max_param += n_extra
+    else:
+        n_extra = 0
+
 
     # (1.5) Get the global and local indices
     # global_index = [0]
     nglobal = len(global_index)
     nlocal = nparams - nglobal
-    n_extra = 0
 
-    if likelihood.physicalize:
-        n_extra = 2
-        nlocal = nlocal + n_extra
-        nparams = nparams + n_extra
-        max_param += n_extra
 
-    # print('n_global:s', n_global, 'n_local:', n_local, 'n_extra:', n_extra, 'nparams:', nparams, flush=True)
-    # sys.exit(0)
 
     # if comp>1 and ignore_previous_eqns:
     #     previous_fns_file = likelihood.fn_dir + "/compl_"+str(comp)+"/previous_eqns_"+str(comp)+".txt"
@@ -325,9 +323,8 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, n_clus
             eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
     
     #add these params to the function params later
-    Niter = 5
-    Nconv = 3
-
+    Niter = 10
+    Nconv = 5
     # Reset chi2
     chi2_min = np.inf
 
@@ -353,17 +350,33 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, n_clus
         }
 
         print('Iteration:', j, flush=True)
-
+        # Generate initial guess for global parametersu
+        pmin = 0
+        pmax = 10
         inpt_global = initial_guess(nglobal, pmin, pmax, likelihood, lhs = True)
+        print('inpt_global:', inpt_global, flush=True)
+        # quit()
         signs = None
         method = 'Nelder-Mead'
 
         if nlocal > 0:
-            res = minimize_scipy(global_loss, inpt_global,  args=(chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood, state), options=dict(gtol = 1e-3), method=method)
+            # if log_opt:
+            #     all_sign_combinations = list(product([1, -1], repeat=nparams))
+            #     for signs in all_sign_combinations:
+            #         res_iteration = minimize_scipy(chi2_fcn, inpt, jac=True,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method=method)
+            #         # print(j, res_iteration['success'], res_iteration['fun'], res_iteration['x'], flush=True)
+            #         choose = jnp.argmin(jnp.array([[res_iteration['fun']], [res_fun]])) #check wether it's succesful before choosing
+            #         # if choose ==0 and res_iteration.success:
+            #         if choose ==0:
+            #             res = res_iteration
+            #             res_fun = res_iteration['fun']
+            #             mult_arr = signs
+                    # print(res.success, res.fun)
+            res = minimize_scipy(global_loss, inpt_global,  args=(chi2_fcn, xvar, yvar, yerr, signs, global_index, nlocal, likelihood, state, n_clusters), options=dict(gtol = 1e-3), method=method)
             # The optimized global parameters
             global_optimized = res.x
             best_local_params = state['best_local_params']
-            print('Best local params:', len(best_local_params), flush=True)
+            # print('Best local params:', best_local_params, flush=True)
             local_count_lowest = state['best_local_count']
             # best_local_params = global_loss.best_local_params
             # local_count_lowest = global_loss.best_local_count
@@ -402,7 +415,7 @@ def mixed_optimise_fun(fcn_i, likelihood, global_index, tmax, pmin, pmax, n_clus
             count_lowest=0
 
         # If within 0.5 of lowest, say converged to that value
-        if abs(res['fun']-chi2_min) < 0.5:
+        if abs(res['fun']-chi2_min) < 0.05:
             count_lowest += 1
 
         if res['fun'] < chi2_min:
@@ -459,7 +472,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
 
     # print('Optimising:', fcn_i, flush=True)
 
-    print(Niter)
+    # print(Niter)
 
     xvar, yvar, yerr= likelihood.xvar, likelihood.yvar, likelihood.yerr
     
@@ -505,6 +518,39 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
         elif ("a0" in fcn_i)==False and likelihood.physicalize:
             rho0, rs = sympy.symbols("rho0 rs", real=True)
             eq_numpy = sympy.lambdify([x, rho0, rs], eq, modules=["jax"])
+
+        # G = 4.302e-6  # kpc km^2 / (Msun s^2)
+
+        # def r1_from_a0(a0):
+        #     return 0.0731 * (a0)**(3/2)
+
+        # def rs_from_r1(r1):
+        #     return r1 / 2.16258
+
+        # def rho_s_from_a0_r1(a0, r1):
+        #     A = 2.16258 * (1 + 2.16258)**2  
+        #     numerator = A * a0**2
+        #     denominator = 2 * jnp.pi * G * r1**2
+        #     return numerator / denominator
+
+        # def rho_sis(r, a0):
+        #     return a0**2 / (2 * jnp.pi * G * r**2)
+
+        # def rho_nfw(r, rs, rho_s):
+        #     x = r / rs
+        #     return rho_s / (x * (1 + x)**2)
+
+        # def eq_numpy(r_Mpc, a0):
+        #     a0 = jnp.abs(a0)
+        #     r = r_Mpc * 1000
+        #     r1 = r1_from_a0(a0)
+        #     rs = rs_from_r1(r1)
+        #     rho_s = rho_s_from_a0_r1(a0, r1)
+
+        #     rho = jnp.where(r <= r1,
+        #                     rho_sis(r, a0),
+        #                     rho_nfw(r, rs, rho_s))
+        #     return rho * 1000**3 /1e12
 
 
         flag_three = False
@@ -570,15 +616,22 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
         # Reset chi2
         chi2_min = np.inf
             
-        if nparam > 2:
-            flag_three = True
+        # if nparam > 2:
+        #     flag_three = True
         
         #OPT
-        loss_template = likelihood.get_loss(eq_numpy)
+        # Nelder-Mead is derivative-free: computing value_and_grad for it wastes a
+        # full backward pass on every one of the (many) restarts. Use a value-only,
+        # jitted loss for it instead; gradient-based methods keep value_and_grad.
+        use_jac = (method != 'Nelder-Mead')
+        if use_jac:
+            loss_template = likelihood.get_loss(eq_numpy)
+        else:
+            loss_template = likelihood.get_loss(eq_numpy, value='evaluate')
         chi2_fcn = likelihood.get_wrapped_like(loss_template)
 
-        grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
-        grad_fcn = likelihood.get_wrapped_like(grad_template)
+        # grad_template = likelihood.get_loss(eq_numpy, value = 'grad')
+        # grad_fcn = likelihood.get_wrapped_like(grad_template)
 
         # params = [3.54185284e-03, 6.57679865e+00]
         # chi2 = chi2_fcn(params, xvar, yvar, yerr, signs=None)
@@ -678,9 +731,15 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
             # plt.show()
             # sys.exit()
 
+        # print('AQUI',pmin, pmax, flush=True)
+
 
         for j in range(Niter):
             inpt = initial_guess(nparam, pmin, pmax, likelihood, lhs = True)
+            if likelihood.physicalize:
+                #add guess for rho0 and rs
+                inpt = np.append(inpt, np.random.uniform(0,pmax))
+                inpt = np.append(inpt, np.random.uniform(0,pmax))
             # print(inpt)
             if log_opt:
                 all_sign_combinations = list(product([1, -1], repeat=nparam))
@@ -689,8 +748,16 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                 res_fun = np.inf
                 mult_arr = []
                 for signs in all_sign_combinations:
-                    res_iteration = minimize_scipy(chi2_fcn, inpt, jac=True,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method=method)
+                    # print(signs)
+                    # print(inpt, flush=True)
+                    # signs = [1, -1, 1]
+                    if likelihood.physicalize:
+                        signs = np.append(signs, [1,0])
+                    res_iteration = minimize_scipy(chi2_fcn, inpt, jac=use_jac,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method=method)
                     # print(j, res_iteration['success'], res_iteration['fun'], res_iteration['x'], flush=True)
+                    #if nan occurs, skip
+                    if np.isnan(res_iteration['fun']):
+                        continue
                     choose = jnp.argmin(jnp.array([[res_iteration['fun']], [res_fun]])) #check wether it's succesful before choosing
                     # if choose ==0 and res_iteration.success:
                     if choose ==0:
@@ -703,9 +770,8 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                 signs = None
                 flag_three = True
                 # method = 'Nelder-Mead'
-                res = minimize_scipy(chi2_fcn, inpt, jac=True,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method=method)
+                res = minimize_scipy(chi2_fcn, inpt, jac=use_jac,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method=method)
                 # print(j, res['success'], res['fun'], res['x'], flush=True)
-                # res = minimize_scipy(chi2_fcn, inpt, jac=False,  args=(xvar, yvar, yerr, signs), options=dict(gtol = 1e-3), method='Nelder-Mead')
                 # res = optimise_with_nlopt(chi2_fcn, inpt, xvar, yvar, yerr, signs, nparam, method)
                 # print(j, res['success'], res['fun'], res['x'], flush=True)            
                     
@@ -717,7 +783,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
 
             # Failure if first 50 all give inf
             
-            if inf_count==50 and np.isinf(chi2_min):
+            if inf_count==1000 and np.isinf(chi2_min):
                 break
 
             # Reset count if log-like improves by 2
@@ -725,7 +791,7 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                 count_lowest=0
 
             # If within 0.5 of lowest, say converged to that value
-            if abs(res['fun']-chi2_min) < 0.5:
+            if abs(res['fun']-chi2_min) < 0.01:
                 count_lowest += 1
                 # print('Converged:', count_lowest, flush=True)
                 # res['success'] = (res['success'] or success_iteration_before)
@@ -743,7 +809,9 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
         
         if chi2_min < 1.e100:
             # Optimisation happened. Print something
-            if flag_three:
+            # if flag_three:
+            if not log_opt:
+                # print('HERE')
                 params = np.zeros(max_param)
                 params[:nparam] = np.array(best['x'][:nparam])
                 if likelihood.physicalize:
@@ -751,11 +819,18 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                 # params = np.pad(np.array(best['x']), (0, max_param-len(best['x'])))
             else:
                 # Params put in linear space and sign added back in
+                #print(log)
                 params = np.zeros(max_param)
                 params[:nparam] = 10.**np.array(best['x'][:nparam]) * mult_arr_best[:nparam]
 
                 if likelihood.physicalize:
-                    params[-2:] = 10.**np.array(best['x'][nparam:]) * mult_arr_best[nparam:]
+                    # print(nparam)
+                    # print(mult_arr_best)
+                    # params[-2:] = 10.**np.array(best['x'][nparam:]) * mult_arr_best[nparam:]
+                    params[-2:] = np.array([
+                            10**v * s if s != 0 else v
+                            for v, s in zip(best['x'][nparam:], mult_arr_best[nparam:])
+                        ])
                 # params = np.pad(10.**np.array(best['x']), (0, max_param-len(best['x']))) * mult_arr_best
         elif not np.isfinite(chi2_min) and method== 'Nelder-Mead':
             print('\tFailed to find parameters for function:', fcn_i)
@@ -763,10 +838,10 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
         # This is after all the iterations, so it's the best we have; reduced chi2
         chi2_i = chi2_min
 
-    except NameError:
-        print(NameError)
-        # Occurs if function produced not implemented in numpy
-        raise NameError
+    # except NameError:
+    #     print(NameError)
+    #     # Occurs if function produced not implemented in numpy
+    #     raise NameError
 
     except simplifier.TimeoutException:
         print('TIMED OUT:', fcn_i, flush=True)
@@ -775,7 +850,12 @@ def optimise_fun(fcn_i, likelihood, tmax, pmin, pmax, comp=0, try_integration=Fa
                 if flag_three:
                     params = np.pad(np.array(best.x), (0, max_param-len(best.x)))
                 else:
-                    params = np.pad(10.**np.array(best.x), (0, max_param-len(best.x))) * mult_arr_best
+                    # params = np.pad(10.**np.array(best.x), (0, max_param-len(best.x))) * mult_arr_best
+                    params = np.array([
+                        10**v * s if s != 0 else v
+                        for v, s in zip(best.x, mult_arr_best[:len(best.x)])
+                    ])
+                    params = np.pad(params, (0, max_param - len(params)))
                 chi2_i = chi2_min
             else:
                 chi2_i = np.nan
@@ -881,37 +961,77 @@ def main(comp, likelihood, tmax=120, pmin=0, pmax=3, print_frequency=50, try_int
         nparam = simplifier.count_params([fcn_list_proc[i]], max_param)[0]
         
             
-        try:
-            #Do BFGS
-            Niter = 400
-            Nconvs = [40, 50, 60, 65]
-            Nconv = Nconvs[nparam - 1]
-            chi2[i], params[i,:], count_lowest, j, success = optimise_fun(fcn_list_proc[i], 
-                                            likelihood, 
-                                            tmax, 
-                                            pmin, 
-                                            pmax, 
-                                            comp=comp,
-                                            try_integration=try_integration,
-                                            log_opt=log_opt,
-                                            max_param=max_param,
-                                            Niter_params=Niter_params,
-                                            Nconv_params=Nconv_params,
-                                            ignore_previous_eqns=ignore_previous_eqns,
-                                            method='BFGS',
-                                            Niter=Niter,
-                                            Nconv=Nconv)
-            
-            method_used = 'BFGS'
-            # print(chi2[i], fcn_list_proc[i])
-            
-            # if not success:
-                # print(chi2[i], 'BFGS')
-            
-            # print(chi2[i], params[i,:], count_lowest, j, success, 'BFGS', flush=True)
-            
-            if (count_lowest < Nconv or not success) and nparam>0:
-            #Do Nelder-Mead
+        # try:
+        #Do BFGS
+        Niter = 400
+        Nconvs = [40, 50, 60, 65]
+        Nconv = Nconvs[nparam - 1]
+        chi2[i], params[i,:], count_lowest, j, success = optimise_fun(fcn_list_proc[i], 
+                                        likelihood, 
+                                        tmax, 
+                                        pmin, 
+                                        pmax, 
+                                        comp=comp,
+                                        try_integration=try_integration,
+                                        log_opt=log_opt,
+                                        max_param=max_param,
+                                        Niter_params=Niter_params,
+                                        Nconv_params=Nconv_params,
+                                        ignore_previous_eqns=ignore_previous_eqns,
+                                        method='BFGS',
+                                        Niter=Niter,
+                                        Nconv=Nconv)
+        
+        method_used = 'BFGS'
+        # print(chi2[i], fcn_list_proc[i])
+        
+        # if not success:
+            # print(chi2[i], 'BFGS')
+        
+        # print(chi2[i], params[i,:], count_lowest, j, success, 'BFGS', flush=True)
+        
+        if (count_lowest < Nconv or not success) and nparam>0:
+        #Do Nelder-Mead
+            try:
+                with simplifier.time_limit(tmax):
+                    Niter = 300
+                    Nconvs = [15, 20, 25, 30]
+                    Nconv = Nconvs[nparam - 1]
+                    chi2NM, paramsNM, count_lowestNM, jNM, successNM = optimise_fun(fcn_list_proc[i], 
+                                                    likelihood, 
+                                                    tmax, 
+                                                    pmin, 
+                                                    pmax, 
+                                                    comp=comp,
+                                                    try_integration=try_integration,
+                                                    log_opt=log_opt,
+                                                    max_param=max_param,
+                                                    Niter_params=Niter_params,
+                                                    Nconv_params=Nconv_params,
+                                                    ignore_previous_eqns=ignore_previous_eqns,
+                                                    method='Nelder-Mead',
+                                                    Niter=Niter,
+                                                    Nconv=Nconv)
+                    
+                    #Choose the best of the two
+                    choose = jnp.argmin(jnp.array([chi2[i], chi2NM ]))
+                    if choose ==1:
+                        chi2[i] = chi2NM
+                        params[i,:] = paramsNM
+                        method_used = 'Nelder-Mead'
+                        j = jNM
+                        count_lowest = count_lowestNM
+                        success = successNM
+                    else:
+                        method_used = 'BFGS'
+                
+                # print(chi2NM, count_lowestNM, jNM, successNM, 'Nelder-Mead')
+            except Exception as e:
+                print(e, flush=True)
+
+
+            if count_lowest < 15 or np.any(params > 10**5):
+                #Do Nelder-Mead
                 try:
                     with simplifier.time_limit(tmax):
                         Niter = 300
@@ -924,7 +1044,7 @@ def main(comp, likelihood, tmax=120, pmin=0, pmax=3, print_frequency=50, try_int
                                                         pmax, 
                                                         comp=comp,
                                                         try_integration=try_integration,
-                                                        log_opt=log_opt,
+                                                        log_opt=True,
                                                         max_param=max_param,
                                                         Niter_params=Niter_params,
                                                         Nconv_params=Nconv_params,
@@ -938,41 +1058,41 @@ def main(comp, likelihood, tmax=120, pmin=0, pmax=3, print_frequency=50, try_int
                         if choose ==1:
                             chi2[i] = chi2NM
                             params[i,:] = paramsNM
-                            method_used = 'Nelder-Mead'
+                            method_used = 'Nelder-Mead log'
                             j = jNM
                             count_lowest = count_lowestNM
                             success = successNM
                         else:
-                            method_used = 'BFGS'
+                            method_used = method_used
                     
                     # print(chi2NM, count_lowestNM, jNM, successNM, 'Nelder-Mead')
                 except Exception as e:
                     print(e, flush=True)
                                                                         
                     # print(chi2[i], params[i,:])
-        except NameError:
-                if try_integration:
-                    chi2[i], params[i,:], count_lowest, j, success = optimise_fun(fcn_list_proc[i], 
-                                                likelihood, 
-                                                tmax, 
-                                                pmin, 
-                                                pmax, 
-                                                comp=comp,
-                                                try_integration=False,
-                                                log_opt=log_opt,
-                                                max_param=max_param,
-                                                Niter_params=Niter_params,
-                                                Nconv_params=Nconv_params,
-                                                ignore_previous_eqns=ignore_previous_eqns)
-                else:
-                    raise NameError
-        except Exception as e:
-            print('overall exception:', e, flush=True) 
-            chi2[i] = np.nan
-            params[i,:] = 0.
-            count_lowest = 0
-            j = 0
-            success = False
+        # except NameError:
+        #         if try_integration:
+        #             chi2[i], params[i,:], count_lowest, j, success = optimise_fun(fcn_list_proc[i], 
+        #                                         likelihood, 
+        #                                         tmax, 
+        #                                         pmin, 
+        #                                         pmax, 
+        #                                         comp=comp,
+        #                                         try_integration=False,
+        #                                         log_opt=log_opt,
+        #                                         max_param=max_param,
+        #                                         Niter_params=Niter_params,
+        #                                         Nconv_params=Nconv_params,
+        #                                         ignore_previous_eqns=ignore_previous_eqns)
+        #         else:
+        #             raise NameError
+        # except Exception as e:
+        #     print('overall exception:', e, flush=True) 
+        #     chi2[i] = np.nan
+        #     params[i,:] = 0.
+        #     count_lowest = 0
+        #     j = 0
+        #     success = False
 
         time_taken = time.time() - start
 

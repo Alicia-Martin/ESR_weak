@@ -57,3 +57,20 @@ examples/fitting/
 examples/data.txt
 esr/function_library
 esr.egg-info/PKG-INFO
+
+# Weak-lensing project: data and results are not distributed (see README)
+/data/
+/results/
+esr/data_CLASH/
+esr/data_fixed_cosmo/
+esr/function_library/
+esr/fitting/output*/
+analysis/output*/
+*.npz
+*.pkl
+*.dat
+*.csv
+notes.md
+NOTES*.md
+*-asmaclap80*
+esr.egg-info/

@@ -113,7 +113,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
             else:
                 eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
     except Exception:
-        # print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
+        print("BAD:", fcn_i, negloglike, np.isfinite(negloglike))
         Fisher_diag = np.nan
         deriv[:] = np.nan
         return params, negloglike, deriv, codelen
@@ -179,16 +179,17 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # Fisher_diag = jnp.array([jnp.nan]*len(Fisher_diag))
     # print('Fisher_diag aqui', fcn_i, Fisher_diag)
     Delta = np.sqrt(12./Fisher_diag)
+    print('Delta fisher code', Delta, flush=True)
     # Delta = theta_ML
     deriv = get_deriv(Hmat, nparam_fun, max_fun_param,  max_param=max_param)
+    # print('deriv', deriv, flush=True)
     Nsteps = abs(np.array(theta_ML))/Delta
 
     # Hfun2 = nd.Hessian(fop, step=np.array([1e-1, 1e-20], dtype=np.float128), method='central')
     # Hmat2 = Hfun2(theta_ML)
     # Fisher_diag2 = jnp.diag(Hmat2)
     # Delta2 = np.sqrt(12./Fisher_diag2)
-    print('Fisher_diag', Fisher_diag)
-    print('Delta', Delta)
+    # print('Delta2', Delta2)
 
     # print(fcn_i, Delta)
 
@@ -201,7 +202,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     # if fcn_i == 'a0*pow(x,a1)':
     # for param_idx in range(len(theta_ML)):
     #     # Delta_plot = theta_ML[param_idx]*10
-    #     Delta_plot = 0.01
+    #     Delta_plot = 2
 
 
 
@@ -233,7 +234,7 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     #     plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
     #     # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
     #     plt.show()
-    #     sys.exit()
+    # sys.exit()
 
     # plt.plot(x_range, grads)
     # plt.plot(theta_ML,grad_fcn(theta_ML, xvar, yvar, yerr) , 'ro')
@@ -256,66 +257,26 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
         # print(Delta)
         return params, negloglike, deriv, codelen
     
-        # Check if the function has any cutoffs in the likelihood
-    # Delta[~kept_mask] = 0.
-    # cutoff_Delta = np.copy(Delta)
-    # cutoff_Delta[Nsteps < 1] = theta_ML[Nsteps < 1]
-    invalid_mask = np.zeros_like(theta_ML, dtype=bool)
-    # print('ESTO')
-    # print(fop(theta_ML + Delta))
-    # print(fop(theta_ML - Delta))
-    #maybe need to check this in a different way
-    for i, theta_i in enumerate(theta_ML):
-        #check each param ibdependently
-        thetas_plus = np.copy(theta_ML)
-        thetas_plus[i] = theta_ML[i] + Delta[i]
-
-        thetas_minus = np.copy(theta_ML)
-        thetas_minus[i] = theta_ML[i] - Delta[i]
-
-        # print('thetas_plus', thetas_plus, fop(thetas_plus))
-        # print('thetas_minus', thetas_minus, fop(thetas_minus))
-
-        if np.isinf(fop(thetas_plus)) or np.isinf(fop(thetas_minus)):
-                codelen = np.nan
-                # deriv = np.nan*np.ones(deriv.shape)
-                invalid_mask[i] = True
-                print(fcn_i, 'cutoffs', flush=True)
-        # return params, negloglike, deriv, codelen
-                
-    # Modify only the relevant entries in deriv
-    # print('deriv', deriv)
-    if np.any(invalid_mask):
-        triu_indices = np.triu_indices(max_param)
-        row_indices, col_indices = triu_indices
-        # Find the indices in 'deriv' that correspond to affected parameters
-        invalid_entries = np.where(np.logical_or(invalid_mask[row_indices], invalid_mask[col_indices]))[0]
-
-        # Set only those specific entries to NaN
-        deriv[invalid_entries] = np.nan
-        codelen = np.nan
-        return params, negloglike, deriv, codelen
-
-    # print('deriv', deriv)
-    # codelen = np.nan if np.any(invalid_mask) else codelen
-    
     k = nparam_total
     # print(fcn_i, k)
     theta_ML_orig = np.copy(theta_ML)
     negloglike_orig = np.copy(negloglike)
 
     # See whether we can snap any parameters to zero
+    # print('Delta', Delta, flush=True)
     # print('Nsteps', Nsteps)
     if np.sum(Nsteps<1)>0:
         # First try setting any parameter to 0 that doesn't have at least
         # one precision step, and recompute -log(L).
         theta_ML[Nsteps<1] = 0.
         negloglike = fop(theta_ML)
-        # print('theta_ML', theta_ML)
-        # print('negloglike', negloglike)
+
+        likelihood = np.exp(-negloglike)
+        # print('negloglike', negloglike, flush=True)
+        # print('likelihood', likelihood, flush=True)
 
         # For the codelen, we effectively don't have the parameter that had Nsteps<1
-        if np.isfinite(negloglike):
+        if np.isfinite(negloglike) and likelihood != 0.:
             k -= np.sum(Nsteps<1)
             kept_mask = Nsteps>=1
         else:
@@ -327,23 +288,27 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
                     for idx_ in idx:
                         theta_ML[idx_] = 0.
                     negloglike = fop(theta_ML)
+                    print('Trying to set to 0 params', idx, 'negloglike', negloglike)
                     if np.isfinite(negloglike):
                         break
             kept_mask = np.ones(len(theta_ML), dtype=bool)
-            if np.isfinite(negloglike):
+            likelihood = np.exp(-negloglike)
+            if np.isfinite(negloglike) and likelihood != 0.:
                 k -= len(idx)
                 kept_mask[idx] = 0
             else:
                 theta_ML = theta_ML_orig
                 negloglike = negloglike_orig
                 k = nparam_total
-            
+                # Delta[Nsteps < 1] = theta_ML[Nsteps < 1]
+                # codelen  = k*math.log(2.) + np.sum(np.log(abs(np.array(theta_ML))/Delta))
+                # return params, negloglike, deriv, codelen
+                
         if k<0:
             print("This shouldn't have happened", flush=True)
             quit()
         elif k==0:
             codelen = 0
-            # print('I am here', flush=True)
             # print('negloglike', negloglike)
             return params, negloglike, deriv, codelen
         
@@ -352,11 +317,24 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
     else:
         kept_mask = np.ones(len(theta_ML), dtype=bool)
 
+    # print('Fisher_diag', Fisher_diag, flush=True)
+    # print('theta_ML', theta_ML, flush=True)
     codelen = -k/2.*math.log(3.) + np.sum( 0.5*np.log(Fisher_diag) + np.log(abs(np.array(theta_ML))) )
+    # print(fcn_i, 'k', k, 'codelen', codelen, flush=True)
 
     # New params after the setting to 0, padded to length max_param as always
     theta_ML = theta_ML_orig
     theta_ML[~kept_mask] = 0.
+
+    # Check if the function has any cutoffs in the likelihood
+    Delta[~kept_mask] = 0.
+    cutoff_Delta = np.copy(Delta)
+    cutoff_Delta[Nsteps < 1] = theta_ML[Nsteps < 1]
+    if np.isinf(fop(theta_ML + Delta)) or np.isinf(fop(theta_ML - Delta)):
+            codelen = np.nan
+            deriv = np.nan*np.ones(deriv.shape)
+            print(fcn_i, 'cutoffs', flush=True)
+            return params, negloglike, deriv, codelen
 
     #Save params
     params = np.zeros(max_param)
@@ -368,9 +346,8 @@ def convert_params(fcn_i, eq,theta_ML, likelihood, negloglike, max_param=4):
 
     # print('codelen', codelen)
     # print(fcn_i)
-
-    # sys.exit()
-
+    # print('codelen', codelen, flush=True)
+    # print('deriv', deriv)
     return params, negloglike, deriv, codelen
 
     
@@ -405,9 +382,6 @@ def main(comp, likelihood, tmax=5, print_frequency=50, try_integration=False):
     codelen = np.zeros(len(fcn_list_proc))          # This is now only for this proc
     params = np.zeros([len(fcn_list_proc), max_param])
     deriv = np.zeros([len(fcn_list_proc), int(max_param * (max_param+1) / 2)])
-
-    # print(len(fcn_list_proc), flush=True)
-    # sys.exit()
 
     for i in range(len(fcn_list_proc)):           # Consider all possible complexities
         if rank == 0 and ((i == 0) or ((i+1) % print_frequency == 0)):

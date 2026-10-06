@@ -105,30 +105,18 @@ def get_sigma_from_integral(p, Sigma, fcn_i, negloglike_all, nparams, max_fun_pa
         arg_integral = np.append(arg_integral, np.argwhere(np.isnan(Sigma)))
 
         #Plot likelihood
-        # if fcn_i == 'pow(x,a0)/x' or fcn_i == 'pow(Abs(a0),(pow(x,x)))':
-        #     print('arg_integral', arg_integral)
-        #     for param_idx in range(len(param)):
-        #         print('param', param[param_idx])
-        #         Delta_plot = 0.1
-        #         x_range = np.linspace(param[param_idx] - Delta_plot, param[param_idx] + Delta_plot, 10**4)
-        #         nll = []
-        #         # print(x_range)
-        #         # grads = []
+        # if fcn_i == 'a0*x + x':
+        #     Delta_plot = 0.1
+        #     x_range = np.linspace(param - Delta_plot, param + Delta_plot, 10**2)
 
-        #         for i in x_range:
-        #             params = np.copy(param)
-        #             params[param_idx] = i
+        #     nll = []
+        #     for x_value in x_range:
+        #         negloglike = fop(x_value)
+        #         nll = np.append(nll, negloglike)
 
-        #             negloglike = fop(params)
-        #             # print('param', params)
-        #             # print('negloglike', negloglike)
-        #             nll = np.append(nll, negloglike)
-
-        #         # plt.plot(x_range, np.exp(-nll))
-        #         plt.plot(x_range, np.exp(-nll + negloglike_all ))
-        #         # plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
-        #         plt.show()
-    # sys.exit()
+        #     plt.plot(x_range, np.exp(-nll + jnp.min(nll)))
+        #     # plt.plot(theta_ML, np.exp(-chi2_fcn(theta_ML, xvar, yvar, yerr) + jnp.min(nll)), 'ro')
+        #     plt.show()
 
         # xx = param + 10**(-2)
         # yy = fop(xx)
@@ -178,10 +166,10 @@ def get_sigma_from_integral(p, Sigma, fcn_i, negloglike_all, nparams, max_fun_pa
                         if test_success(res)== True:
                             if factor == -1:
                                 boundary_left = get_boundary(res, log)
-                                # print('boundary_left', fcn_i, theta, boundary_left, flush=True)
+                                # print('boundary_left', boundary_left, flush=True)
                             else:
                                 boundary_right = get_boundary(res, log)
-                                # print('boundary_right', fcn_i, theta, boundary_right, flush=True)
+                                # print('boundary_right', boundary_right, flush=True)
                             boundary_found = True
                             break
 
@@ -263,16 +251,16 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
     # Data
     xvar = likelihood.xvar
     yvar = likelihood.yvar
-    yerr = likelihood.yerr
-
+    # The WL likelihood takes the Cholesky factor of the covariance, not the 1D errors
+    L = likelihood.L_factor
 
     def get_fop(chi2_fcn, total_param):
         if total_param > 0:
             def fop(x):
-                return chi2_fcn(x, xvar, yvar, yerr)[0]
+                return chi2_fcn(x, xvar, yvar, L)
         else:
             def fop(x):
-                return chi2_fcn([x], xvar, yvar, yerr)[0]
+                return chi2_fcn([x], xvar, yvar, L)
         return fop
         
     if rank == 0:
@@ -344,7 +332,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         #CHANGE THIS - take this out actually
         try:
             eq_numpy = get_eq_numpy(nparams, fcn_i, try_integration, tmax)
-            loss_template = likelihood.get_loss(eq_numpy)
+            loss_template = likelihood.get_loss(eq_numpy, value = 'evaluate')
             chi2_fcn =likelihood.get_wrapped_like(loss_template)
         except:
             print('Error with function:', fcn_i)
@@ -366,10 +354,6 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         #     continue
 
         
-        # xvar = likelihood.xvar
-        # yvar = likelihood.yvar
-        # yerr = likelihood.yerr
-
         if np.isnan(negloglike[index]) or np.isinf(negloglike[index]):          # Element of the unique eqs file, common to all procs
             codelen[i] = np.nan
             continue
@@ -379,11 +363,8 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         else:
             # k = nparams
             # measured = params_meas[index,:nparams].copy()
-            # k = max_param
-            k = total_param
-            measured = params_meas[index,:max_param].copy()
-            # print('measured', measured)
-            # sys.exit()
+            k = max_param
+            measured = params_meas[index,:k].copy()
         
         fish_measured = all_fish[index,:]               # Access from the unique eqs all_fish array, common to all procs
         try:
@@ -402,7 +383,7 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
                 #p and SIgma have different lengths
 
                 #add the thing here
-                # print('first Sigma', fcn_i, Sigma)
+                # print('first Sigma', Sigma)
                 if isinstance(p, float):
                     p=[p]
                 p = np.atleast_1d(p)
@@ -429,8 +410,6 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
         #     print('HERE')
         #     continue
 
-        # print('first Sigma', fcn_i, Sigma)
-
         #If Sigma is not defined we need to compute it integrating
         if (np.sum(Sigma <= 0.) > 0.) or (np.sum(np.isnan(Sigma)) > 0) or (np.sum(np.isinf(Sigma)) > 0):#  or (np.sum(Nsteps<1) > 0):
             # print('here')
@@ -455,9 +434,8 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             #here p and Sigma have the shape of max_params
             # print('SIgmassss', nparams, flush=True)
             # print('p', p, flush=True)
-            # print('Sigma', Sigma, flush=True)
             Sigma = get_sigma_from_integral(p, Sigma, fcn_i, negloglike_fcn, nparams, max_fun_params, fop, number_points=10**3)
-            # print('Sigma2', Sigma, flush=True)
+            # print('Sigma', Sigma, flush=True)
             # print(p, flush=True)
             if np.isnan(Sigma).any():
                 Sigma[np.isnan(Sigma)] = np.inf
@@ -484,32 +462,13 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             m = (Delta != 0)
             Nsteps[m] /= Delta[m]
             Nsteps[~m] = np.nan
-            print('HOLA', fcn_i, p, Delta, Sigma)
-            print('negloglike_all[i]', negloglike_all[i])
-            # print(p[:nparams], p[max_fun_params:])
-
-
-            def get_fop2(chi2_fcn):
-                def fop(x):
-                    return chi2_fcn(x, likelihood.xvar, likelihood.yvar, likelihood.yerr)[0]
-                return fop
-
-            loss_template2 = likelihood.get_loss(eq_numpy)
-            chi2_fcn2 = likelihood.get_wrapped_like(loss_template2) #change this
-            fop2 = get_fop2(chi2_fcn2)
-            fop = get_fop(chi2_fcn, total_param=total_param)
-            # print(p[:nparams], p[max_fun_params:])
-
-            # print('fop', fop2(np.append(p[:nparams], p[max_fun_params:])))
-            print('negloglike', fop(np.append(p[:nparams], p[max_fun_params:])))
 
             #Nsteps has shape of params taking out zeroes
             # Nsteps = np.concatenate(Nsteps[:nparams], Nsteps[max_fun_params:])
 
             # print("I'M HERE", fcn_i, Delta, Nsteps)
-        except Exception as ex:
+        except:
             print('Error with function:', fcn_i)
-            print(ex)
             codelen[i] = np.inf
             continue
         
@@ -521,155 +480,116 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
 
         #Set delta=theta for all galaxy params with Nsteps<1 -- don't set to 0 because we want to keep the parameter in the model
         #to here p, Sigma and Nsteps have hape of max_param
+        # ...existing code...
+        #Nsteps has shape of params taking out zeroes
+        # Nsteps = np.concatenate(Nsteps[:nparams], Nsteps[max_fun_params:])
+
+        # print("I'M HERE", fcn_i, Delta, Nsteps)
+
+
+        # ...existing code up to the Nsteps handling ...
         Nsteps_gal = Nsteps[nparams:]
         if np.sum(Nsteps_gal<1)>0:
-            Delta[nparams:][Nsteps_gal<1] = abs(p[nparams:][Nsteps_gal<1])
-            fish[np.argwhere(Nsteps_gal<1)] = 12./(p[np.argwhere(Nsteps_gal<1)]**2)
+            gal_idx = nparams + np.where(Nsteps_gal<1)[0]     # indices into the full p/Delta/fish arrays
+            Delta[gal_idx] = abs(p[gal_idx])
+            fish[gal_idx] = 12./(p[gal_idx]**2)
             Nsteps[nparams:][Nsteps_gal<1] = 1
-        # print('Nsteps despues de esto', Nsteps, flush=True)
-        if np.sum(Nsteps<1)>0:         # should reevaluate -log(L) with the param(s) set to 0, but doesn't matter unless the fcn is a very good one
-            # print('Nsteps despues de esto', Nsteps)
-            try:
-                # print('p', p, flush=True)
-                p[Nsteps<1] = 0.         # Set any parameter to 0 that doesn't have at least one precision step, and recompute -log(L).
-                # print('p despues', p, flush=True)
-            except (IndexError, TypeError):
-                p=0.
-            
-            # try:            # It's possible that after putting params to 0 the likelihood is botched, in which case give it nan
-            #     # fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=try_integration)
-            #     # if k==1:
-            #     #     eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
-            #     #     fop = get_fop(chi2_fcn, total_pram=nparams)
-            #     #     negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
-            #     #     # print('negloglike_all[i]', negloglike_all[i])
-            #     # else:
-            #     #     all_a = ' '.join([f'a{i}' for i in range(nparams)])
-            #     #     all_a = list(sympy.symbols(all_a, real=True))
-            #     #     eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
-            #     #     fop = get_fop(chi2_fcn, total_param=nparams)
-            #     #     negloglike_all[i] = fop(p)
-                
 
-            # except NameError:
-            #     if try_integration:
-            #         fcn_i, eq = likelihood.run_sympify(fcn_i, tmax=tmax, try_integration=False)
-            #         if k==1:
-            #             eq_numpy = sympy.lambdify([x, a0], eq, modules=["jax"])
-            #             negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
-            #         else:
-            #             all_a = ' '.join([f'a{i}' for i in range(nparams)])
-            #             all_a = list(sympy.symbols(all_a, real=True))
-            #             eq_numpy = sympy.lambdify([x] + all_a, eq, modules=["jax"])
-            #             fop = get_fop(chi2_fcn, total_param=nparams)
-            #             negloglike_all[i] = fop(p)
-            #     else:
-            #         negloglike_all[i] = np.nan
+        # Full-length Delta as used in the codelen (inf -> |p|, capped at |p|), for saving to file
+        Delta_used = np.where(np.isfinite(Delta), Delta, np.abs(ptrue))
+        Delta_used = np.minimum(Delta_used, np.abs(ptrue))
 
-            # except:
-            #     negloglike_all[i] = np.nan
-                
-            # fop = get_fop(chi2_fcn, total_param=nparams)
+        # NEW: only snap-to-zero if total (negloglike + codelen) improves
+        if np.sum(Nsteps<1)>0:
+            # prepare original quantities
+            p_orig = p.copy()
+            Delta_orig = Delta.copy()
+
+            # define helper to compute codelen for a given kept_mask and p/Delta
+            def compute_codelen_from_mask(p_vec, Delta_vec, kept_mask):
+                try:
+                    p_kept = p_vec[kept_mask]
+                    Delta_kept = np.array(Delta_vec[kept_mask], dtype=float)
+                    # if any problematic values, return +inf
+                    if len(p_kept) == 0:
+                        return 0.0
+                    if np.any(~np.isfinite(p_kept)):
+                        return np.inf
+                    # Unconstrained parameters (Delta=inf) get Delta=|p|, exactly as in the
+                    # final codelen below. Returning inf here instead made total_orig=inf, so
+                    # any finite snap was accepted however much it worsened the likelihood.
+                    Delta_kept = np.where(np.isfinite(Delta_kept), Delta_kept, np.abs(p_kept))
+                    # Floor Delta at |p|: Nsteps can never be trusted as better than
+                    # 1 step, so a poorly-measured parameter must not get an
+                    # artificial codelen "discount" (log(|p|/Delta) < 0) for being
+                    # worse than 1 step. This MUST match the cap applied to the
+                    # final reported codelen (a few lines below, outside this
+                    # function) -- otherwise the snap-vs-keep decision here and the
+                    # number actually reported are computed on inconsistent bases,
+                    # which can make "keep" look artificially cheaper than it is
+                    # and bias the decision against ever snapping.
+                    safe_p = np.abs(p_kept)
+                    pos = Delta_kept > 0
+                    Delta_kept[pos] = np.minimum(Delta_kept[pos], safe_p[pos])
+                    # Exclude exactly-zero parameters (already effectively dropped)
+                    # rather than letting log(0/Delta) = -inf poison the sum --
+                    # same convention as the final codelen formula below.
+                    valid = (p_kept != 0) & (Delta_kept > 0)
+                    if not np.any(valid):
+                        return 0.0
+                    k_val = float(np.sum(valid))
+                    return k_val * math.log(2.) + np.sum(np.log(np.abs(p_kept[valid]) / Delta_kept[valid]))
+                except Exception:
+                    return np.inf
+
+            # original negloglike (before snapping)
+            neglog_orig = negloglike_all[i].copy() if np.isfinite(negloglike_all[i]) else np.inf
+            # compute original codelen (estimate using current p/Delta and mask of all params currently considered)
+            kept_mask_all = np.ones_like(p_orig, dtype=bool)
+            codelen_orig = compute_codelen_from_mask(p_orig, Delta_orig, kept_mask_all)
+            total_orig = neglog_orig + codelen_orig
+
+            # Try every subset of the unresolved (Nsteps<1) parameters and keep the one with the
+            # lowest negloglike + codelen. There are at most max_fun_params of them, so this is
+            # cheap, and unlike "snap all, else accept the first improving subset" it always
+            # finds the best snap set.
+            snap_idx = np.where(Nsteps < 1)[0]
             fop = get_fop(chi2_fcn, total_param=total_param)
-            params_no_zeroes = np.append(p[:nparams], p[max_fun_params:])
-            negloglike_all[i] = fop(params_no_zeroes)
-            # print('negloglike_all[i]', negloglike_all[i], flush=True)
-                
-            if np.isfinite(negloglike_all[i]):
-                k -= np.sum(Nsteps<1)
-                # kept_mask = Nsteps>=1
+            best = None     # (total, idx_comb, p_trial, neglog_trial)
+            for r in range(1, len(snap_idx) + 1):
+                for idx_comb in itertools.combinations(snap_idx, r):
+                    p_trial = p_orig.copy()
+                    p_trial[list(idx_comb)] = 0.0
+                    try:
+                        params_no_zeroes_trial = np.append(p_trial[:nparams], p_trial[max_fun_params:])
+                        neglog_trial = float(fop(params_no_zeroes_trial))
+                    except Exception:
+                        neglog_trial = np.inf
+                    if not np.isfinite(neglog_trial):
+                        continue
+                    kept_mask_trial = np.ones_like(p_trial, dtype=bool)
+                    kept_mask_trial[list(idx_comb)] = False
+                    total_trial = neglog_trial + compute_codelen_from_mask(p_trial, Delta_orig, kept_mask_trial)
+                    if total_trial < total_orig - 1e-8 and (best is None or total_trial < best[0]):
+                        best = (total_trial, idx_comb, p_trial, neglog_trial)
 
+            if best is not None:
+                _, idx_comb, p, negloglike_all[i] = best
+                n_removed = len(idx_comb)
+                k -= n_removed
                 kept_mask = np.ones(len(ptrue), dtype=bool)
-                kept_mask[np.argwhere(Nsteps<1)] = 0
-                #shape of p, Delta and fish, kept_mask is max_param
-
-                # print('kept_mask', kept_mask, flush=True)
-
-                nparams = nparams - np.sum(Nsteps<1)
-                max_fun_params = max_fun_params - np.sum(Nsteps<1)
-                # print('p aqui en el if', p, flush=True)
-                #Add something here
-
+                kept_mask[list(idx_comb)] = False
+                nparams = nparams - n_removed
+                max_fun_params = max_fun_params - n_removed
             else:
-                # Let's see if setting any of the parameters to zero is ok
-                try_idx = np.arange(max_param)[Nsteps < 1]
-                for r in reversed(range(1, len(try_idx))):
-                    for idx in itertools.combinations(try_idx, r):
-                        p = np.copy(ptrue)
-                        for idx_ in idx:
-                            p[idx_] = 0.
-                        # if k==1:
-                        #     fop = get_fop(chi2_fcn, total_param=nparams)
-                        #     negloglike_all[i] = fop(p)               # Modified here for this variant, but if this doesn't happen it stays the same as the unique eq
-                        # else:
-                        #     # fop = get_fop(chi2_fcn, total_param=len(p))
-                        #     negloglike_all[i] = fop(p)
-                            
-                        p_params = np.append(p[:nparams], p[max_fun_params:])
-                        negloglike_all[i] = fop(p_params)
-                        if np.isfinite(negloglike_all[i]):
-                            nparams = nparams - len(idx)
-                            max_fun_params = max_fun_params - len(idx)
-
-                            Delta[np.argwhere(Nsteps<1)] = abs(p[np.argwhere(Nsteps<1)])
-                            break
-                kept_mask = np.ones(len(p), dtype=bool)
-                if np.isfinite(negloglike_all[i]):
-                    k -= len(idx)
-                    kept_mask[idx] = 0
-                # elif not np.isfinite(negloglike_all[i]) and not np.isnan(negloglike_all[i]): # infinite nll
-                elif not np.isfinite(negloglike_all[i]):
-                    p = ptrue
-                    # fish= fish[:nparams]
-                    fish[Nsteps<1] = 12./(p[Nsteps<1]**2) # set uncertainty=parameter in this case
-                    Delta[np.argwhere(Nsteps<1)] = abs(p[np.argwhere(Nsteps<1)])
-                    # codelen[i] = -k/2.*math.log(3.) + np.sum( 0.5*np.log(fish) + np.log(abs(np.array(p))) )
-                    # p = np.append(p, np.zeros(max_param - len(p)))
-
-                    # Delta_codelen = Delta[:nparams]
-                    # p_codelen = p[:nparams]
-                    Delta_codelen = np.append(Delta[:nparams], Delta[max_fun_params:])
-                    p_codelen = np.append(p[:nparams], p[max_fun_params:])
-                    codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p_codelen))/Delta_codelen))
-                    # print(i, fcn_i, codelen[i], negloglike_all[i], flush=True)
-                    negloglike_all[i] = negloglike_orig
-                    print(i, fcn_i, codelen[i], negloglike_all[i], flush=True)
-                    try:        # If p was an array, we can make a list out of it
-                        list_p = list(p)
-                        # params[i,:] = np.pad(p, (0, max_param-len(p)))
-                        # Deltas[i,:] = np.pad(Delta, (0, max_param-len(Delta)))
-                        params[i,:] = p
-                        Deltas[i,:] = Delta
-                    except:     # p is either a number or nothing
-                        if p:   # p is a number
-                            params[i,:] = 0
-                            params[i,0] = p
-                            Deltas[i,:] = 0
-                            Deltas[i,0] = Delta
-                        else:
-                            params[i,:] = np.zeros(max_param)
-                            Deltas[i,:] = np.zeros(max_param)
-                    
-                    assert len(params[i,:])==max_param
-                    continue
+                # nothing improved: leave p unchanged and keep original negloglike
+                negloglike_all[i] = negloglike_orig
+                kept_mask = np.ones(len(ptrue), dtype=bool)
 
             if k<0:
                 print("This shouldn't have happened", flush=True)
                 quit()
             elif k==0:                  # If we have no parameters left then the parameter codelength is 0 so we can move on
-                continue
-
-            #check if after snapping params to 0, function is 0, then set every other parameter to 0
-            params_no_zeroes = np.append(p[:nparams], p[max_fun_params:])
-            if np.all(eq_numpy(xvar, *params_no_zeroes)) == 0:
-                # print('HERE')
-                print('params_no_zeroes', params_no_zeroes)
-                print('negloglike_all[i]', negloglike_all[i])
-                params[i,:] = np.zeros(max_param)
-                Deltas[i,:] = np.zeros(max_param)
-                codelen[i] = 0
-                negloglike_all[i] = negloglike_orig
-                print('FINAL', i, fcn_i, codelen[i], negloglike_all[i], flush=True)
                 continue
             
             # print('HOLA', fish, nparams, kept_mask, flush=True)
@@ -681,6 +601,11 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
             
         else:
             kept_mask = np.ones(len(p), dtype=bool)
+
+        # Ensure Delta is finite and no larger than |p|.
+        safe_p = np.abs(p)
+        Delta = np.where(np.isfinite(Delta), Delta, safe_p)
+        Delta = np.minimum(Delta, safe_p)
         
         # print(fcn_i, p, Delta)
         
@@ -693,16 +618,23 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
 
             p2 = np.append(p[:nparams], p[max_fun_params:])
             Delta2 = np.append(Delta[:nparams], Delta[max_fun_params:])
-            codelen[i] = k*math.log(2.) + np.sum(np.log(abs(np.array(p2))/Delta2))
-            print('codelen', codelen[i], flush=True)
+            valid_mask = np.isfinite(p2) & np.isfinite(Delta2) & (Delta2 > 0) & (p2 != 0)
+            p2 = p2[valid_mask]
+            Delta2 = Delta2[valid_mask]
+            k_codelen = int(np.sum(valid_mask))
+            if k_codelen == 0:
+                codelen[i] = 0.0
+            else:
+                codelen[i] = k_codelen*math.log(2.) + np.sum(np.log(np.abs(np.array(p2))/Delta2))
+            # print('codelen', codelen[i], flush=True)
             # print('p', p2, flush=True)
             # print('Delta', Delta2, flush=True)
         except:
             codelen[i] = np.nan
-        
+
         p = ptrue
         p[~kept_mask]=0.
-        Delta = Delta_true
+        Delta = Delta_used
         Delta[~kept_mask]=0.
         # Delta = np.append(Delta[:nparams], Delta[max_fun_params:])
         # Delta = Delta[:nparams]
@@ -730,21 +662,19 @@ def main(comp, likelihood, tmax=5, print_frequency=1000, try_integration=False):
 
         # print('HERE', params[i,:], Deltas[i,:])
 
-        print('FINAL', i, fcn_i, codelen[i], negloglike_all[i], flush=True)
+        # print(i, fcn_i, codelen[i], negloglike_all[i], flush=True)
         
 
     # print(codelen, flush=True)
         
-    # for i in range(len(params)):          # Loop over all unique fcns to find variant with min codelength
-    #     for j in range(len(params[i])):
-    #         if Deltas[i,j] == 0 and params[i,j] != 0:
-    #             print(fcn_list_proc[i], params[i], Deltas[i])
+    for i in range(len(params)):          # Loop over all unique fcns to find variant with min codelength
+        for j in range(len(params[i])):
+            if Deltas[i,j] == 0 and params[i,j] != 0:
+                print(fcn_list_proc[i], params[i], Deltas[i])
     
     fcn_list_proc = np.array(fcn_list_proc)
     print(fcn_list_proc[np.argwhere(codelen == np.inf)])
     print(fcn_list_proc[np.argwhere(codelen == - np.inf)])
-
-    print('negloglike', fcn_list_proc[np.argwhere(negloglike_all == np.inf)])
     # print(params)
     # print(Deltas)
     # print(codelen)

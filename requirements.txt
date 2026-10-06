@@ -11,3 +11,12 @@ prettytable
 numdifftools
 mpi4py
 astropy
+# weak-lensing extensions
+jax
+quadax
+numpyro
+arviz
+corner
+tabulate
+mpmath
+katz @ git+https://github.com/DeaglanBartlett/katz.git
